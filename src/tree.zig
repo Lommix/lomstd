@@ -1,9 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-/// # MultiTreeUnmanaged
+/// # MultiTree
 /// a flat multi root tree structure for UI and similar
-pub fn MultiTreeUnmanaged(comptime T: type) type {
+pub fn MultiTree(comptime T: type) type {
     return struct {
         const Self = @This();
         pub const NodeID = u32;
@@ -497,7 +497,7 @@ pub fn MultiTreeUnmanaged(comptime T: type) type {
 test "insert" {
     const expect = std.testing.expect;
     const alloc = std.testing.allocator;
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 33);
@@ -558,7 +558,7 @@ test "insert" {
 
 test "many" {
     const alloc = std.testing.allocator;
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
     const root = try tree.root(alloc, 0);
     for (0..1000) |i| {
@@ -569,7 +569,7 @@ test "many" {
 
 test "parent_ids" {
     const alloc = std.testing.allocator;
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
     const root = try tree.root(alloc, 0);
     const child1 = try tree.insert(alloc, root, 1);
@@ -588,7 +588,7 @@ test "extend_parent" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root1 = try tree.root(alloc, 1);
@@ -610,7 +610,7 @@ test "remove leaf node" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 0);
@@ -641,7 +641,7 @@ test "remove node with children" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 0);
@@ -669,7 +669,7 @@ test "remove root node" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root1 = try tree.root(alloc, 1);
@@ -692,7 +692,7 @@ test "remove with swap references" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     // Create a simpler structure to test swap references
@@ -727,7 +727,7 @@ test "remove single node tree" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 42);
@@ -744,7 +744,7 @@ test "remove multiple nodes sequentially" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 0);
@@ -776,7 +776,7 @@ test "remove deep nested structure" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     // Create a deep nested structure
@@ -805,7 +805,7 @@ test "remove with complex sibling relationships" {
     const alloc = std.testing.allocator;
     const expect = std.testing.expect;
 
-    var tree = MultiTreeUnmanaged(u32){};
+    var tree = MultiTree(u32){};
     defer tree.deinit(alloc);
 
     const root = try tree.root(alloc, 0);
