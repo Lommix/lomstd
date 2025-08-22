@@ -3,3 +3,4 @@ pub const MultiTree = @import("tree.zig").MultiTree;
 pub const Easing = @import("easing.zig").Easing;
 pub const Math = @import("zmath.zig");
 pub const Qtree = @import("qtree.zig");
+pub const hashStr = @import("hash.zig").hashStr;

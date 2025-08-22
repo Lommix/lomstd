@@ -1,10 +1,12 @@
 # lomstd
 
-Lommix's zig essentials.
+Lommix's zig essentials. Each in a separate file for copy pasting.
 
 ## Content
 
 - Layout: responsive UI layout math.
 - Tree: multi root flat tree for UI or Physics.
+- QTree: simple quad tree using the flat tree above.
 - Easing: common easing functions.
 - ZMath: SIMD math lib (forked)
+- hashStr: simple & fast xor hashing.
