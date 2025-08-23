@@ -26,8 +26,8 @@ pub fn MultiTree(comptime T: type) type {
         };
 
         nodes: std.MultiArrayList(Slot) = .{},
-        relation: std.ArrayListUnmanaged(Relation) = .{},
-        roots: std.ArrayListUnmanaged(NodeID) = .{},
+        relation: std.ArrayList(Relation) = .{},
+        roots: std.ArrayList(NodeID) = .{},
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
             if (std.meta.hasMethod(T, "deinit")) {
@@ -167,15 +167,15 @@ pub fn MultiTree(comptime T: type) type {
             };
         }
 
-        pub fn remove(self: *Self, node_id: NodeID) void {
+        pub fn remove(self: *Self, gpa: Allocator, node_id: NodeID) void {
             std.debug.assert(node_id < self.nodes.len);
 
             // Collect all nodes to be removed (including descendants)
-            var to_remove = std.ArrayList(NodeID).init(std.heap.page_allocator);
-            defer to_remove.deinit();
+            var to_remove = std.ArrayList(NodeID){};
+            defer to_remove.deinit(gpa);
 
-            self.collectDescendants(node_id, &to_remove);
-            to_remove.append(node_id) catch unreachable;
+            self.collectDescendants(gpa, node_id, &to_remove);
+            to_remove.append(gpa, node_id) catch unreachable;
 
             // Sort in descending order so we remove from the end first
             std.mem.sort(NodeID, to_remove.items, {}, std.sort.desc(NodeID));
@@ -185,13 +185,13 @@ pub fn MultiTree(comptime T: type) type {
             }
         }
 
-        fn collectDescendants(self: *Self, node_id: NodeID, list: *std.ArrayList(NodeID)) void {
+        fn collectDescendants(self: *Self, gpa: Allocator, node_id: NodeID, list: *std.ArrayList(NodeID)) void {
             var rel_id = self.nodes.items(.link)[node_id].first_child_relation_id;
 
             while (rel_id) |current_rel| {
                 const child_node = self.relation.items[current_rel].node_index;
-                self.collectDescendants(child_node, list);
-                list.append(child_node) catch unreachable;
+                self.collectDescendants(gpa,child_node, list);
+                list.append(gpa, child_node) catch unreachable;
                 rel_id = self.relation.items[current_rel].next_child_relation_id;
             }
         }
@@ -330,12 +330,13 @@ pub fn MultiTree(comptime T: type) type {
 
         pub const DepthFirstIter = struct {
             tree: *Self,
-            stack: std.ArrayList(RelationID),
+            stack: std.ArrayList(RelationID) = .{},
+            gpa: Allocator,
             root: NodeID,
             passed_root: bool = false,
 
             pub fn deinit(self: *DepthFirstIter) void {
-                self.stack.deinit();
+                self.stack.deinit(self.gpa);
             }
 
             pub fn next(self: *DepthFirstIter) ?Entry {
@@ -343,7 +344,7 @@ pub fn MultiTree(comptime T: type) type {
                     const root_link = self.tree.nodes.items(.link)[self.root]; // self.root);
 
                     if (root_link.first_child_relation_id) |id| {
-                        self.stack.append(id) catch unreachable;
+                        self.stack.append(self.gpa,id) catch unreachable;
                     }
 
                     self.passed_root = true;
@@ -357,11 +358,11 @@ pub fn MultiTree(comptime T: type) type {
                 const rel = &self.tree.relation.items[next_id];
 
                 if (rel.next_child_relation_id) |next_sibling| {
-                    self.stack.append(next_sibling) catch unreachable;
+                    self.stack.append(self.gpa,next_sibling) catch unreachable;
                 }
 
                 if (self.tree.nodes.items(.link)[rel.node_index].first_child_relation_id) |next_child| {
-                    self.stack.append(next_child) catch unreachable;
+                    self.stack.append(self.gpa,next_child) catch unreachable;
                 }
 
                 return Entry{
@@ -371,11 +372,11 @@ pub fn MultiTree(comptime T: type) type {
             }
         };
 
-        pub fn IterateDepthFirst(self: *Self, allocator: Allocator, root_id: NodeID) DepthFirstIter {
+        pub fn IterateDepthFirst(self: *Self, gpa: Allocator, root_id: NodeID) DepthFirstIter {
             return DepthFirstIter{
                 .tree = self,
-                .stack = std.ArrayList(RelationID).init(allocator),
                 .root = root_id,
+                .gpa = gpa,
             };
         }
         // ------------------------
@@ -388,25 +389,25 @@ pub fn MultiTree(comptime T: type) type {
 
         pub const BreadthFristIter = struct {
             tree: *Self,
-            current_layer: std.ArrayList(NodeID),
-            next_layer: std.ArrayList(NodeID),
+            current_layer: std.ArrayList(NodeID) = .{},
+            next_layer: std.ArrayList(NodeID) = .{},
             root: NodeID,
             passed_root: bool = false,
+            gpa: Allocator,
 
             pub fn deinit(self: *BreadthFristIter) void {
-                self.current_layer.deinit();
-                self.next_layer.deinit();
+                self.current_layer.deinit(self.gpa);
+                self.next_layer.deinit(self.gpa);
             }
 
             pub fn next(self: *BreadthFristIter) ?Entry {
                 if (!self.passed_root) {
                     var it = self.tree.IterateChildren(self.root);
                     while (it.next()) |c| {
-                        self.current_layer.append(c.node_id) catch unreachable;
+                        self.current_layer.append(self.gpa, c.node_id) catch unreachable;
                     }
 
                     std.mem.reverse(NodeID, self.current_layer.items);
-
                     self.passed_root = true;
 
                     return Entry{
@@ -418,7 +419,7 @@ pub fn MultiTree(comptime T: type) type {
                 if (self.current_layer.pop()) |node_id| {
                     var child_iter = self.tree.IterateChildren(node_id);
                     while (child_iter.next()) |entry| {
-                        self.next_layer.append(entry.node_id) catch unreachable;
+                        self.next_layer.append(self.gpa, entry.node_id) catch unreachable;
                     }
 
                     return .{
@@ -432,19 +433,20 @@ pub fn MultiTree(comptime T: type) type {
                 }
 
                 while (self.next_layer.pop()) |n| {
-                    self.current_layer.append(n) catch unreachable;
+                    self.current_layer.append(self.gpa,n) catch unreachable;
                 }
 
                 return self.next();
             }
         };
 
-        pub fn IterateBreathedFirst(self: *Self, allocator: Allocator, root_id: NodeID) BreadthFristIter {
+        pub fn IterateBreathedFirst(self: *Self, gpa: Allocator, root_id: NodeID) BreadthFristIter {
             return BreadthFristIter{
                 .tree = self,
-                .current_layer = std.ArrayList(NodeID).init(allocator),
-                .next_layer = std.ArrayList(NodeID).init(allocator),
+                .current_layer = .{},
+                .next_layer = .{},
                 .root = root_id,
+                .gpa = gpa,
             };
         }
 
@@ -622,7 +624,7 @@ test "remove leaf node" {
     try expect(tree.nodes.len == 4);
 
     // Remove middle child
-    tree.remove(child2);
+    tree.remove(alloc, child2);
 
     try expect(tree.childCount(root) == 2);
     try expect(tree.nodes.len == 3);
@@ -656,7 +658,7 @@ test "remove node with children" {
     try expect(tree.nodes.len == 5);
 
     // Remove parent node (should remove all descendants)
-    tree.remove(parent);
+    tree.remove(alloc, parent);
 
     try expect(tree.childCount(root) == 0);
     try expect(tree.nodes.len == 1); // Only root should remain
@@ -681,7 +683,7 @@ test "remove root node" {
     try expect(tree.nodes.len == 4);
 
     // Remove first root
-    tree.remove(root1);
+    tree.remove(alloc, root1);
 
     try expect(tree.roots.items.len == 1);
     try expect(tree.nodes.len == 1);
@@ -705,7 +707,7 @@ test "remove with swap references" {
     try expect(tree.childCount(root) == 3);
 
     // Remove first child (n1) - this will cause swap references
-    tree.remove(n1);
+    tree.remove(alloc, n1);
 
     try expect(tree.nodes.len == 3);
     try expect(tree.childCount(root) == 2);
@@ -734,7 +736,7 @@ test "remove single node tree" {
     try expect(tree.nodes.len == 1);
     try expect(tree.roots.items.len == 1);
 
-    tree.remove(root);
+    tree.remove(alloc, root);
 
     try expect(tree.nodes.len == 0);
     try expect(tree.roots.items.len == 0);
@@ -764,7 +766,7 @@ test "remove multiple nodes sequentially" {
         // Get the first child and remove it
         var iter = tree.IterateChildren(root);
         if (iter.next()) |child| {
-            tree.remove(child.node_id);
+            tree.remove(alloc,child.node_id);
         }
     }
 
@@ -796,7 +798,7 @@ test "remove deep nested structure" {
 
     try expect(tree.nodes.len == 13);
 
-    tree.remove(middle_node);
+    tree.remove(alloc, middle_node);
 
     try expect(tree.nodes.len == 10); // Back to original structure
 }
@@ -824,17 +826,17 @@ test "remove with complex sibling relationships" {
     try expect(tree.childCount(d) == 1);
 
     // Remove middle siblings
-    tree.remove(b); // This should remove b and its children (20, 21)
+    tree.remove(alloc, b); // This should remove b and its children (20, 21)
 
     try expect(tree.childCount(root) == 3);
 
     // Verify remaining structure
     var iter = tree.IterateChildren(root);
-    var values = std.ArrayList(u32).init(alloc);
-    defer values.deinit();
+    var values = std.ArrayList(u32){};
+    defer values.deinit(alloc);
 
     while (iter.next()) |entry| {
-        try values.append(entry.value.*);
+        try values.append(alloc,entry.value.*);
     }
 
     try expect(values.items.len == 3);

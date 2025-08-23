@@ -8,7 +8,7 @@ pub fn Node(comptime T: type) type {
     return struct {
         bounds: Rect, // todo vec align
         val: union(enum) {
-            leaf: std.ArrayListUnmanaged(Slot(T)),
+            leaf: std.ArrayList(Slot(T)),
             branch,
         } = .{ .leaf = .{} },
     };
@@ -31,7 +31,7 @@ const Direction = enum {
 /// Quadtree
 pub fn Quadtree(comptime T: type) type {
     return struct {
-        const Tree = tree.MultiTreeUnmanaged(Node(T));
+        const Tree = tree.MultiTree(Node(T));
         const MINSIZE: u32 = 100;
         const MAXITEMS: u32 = 32;
         const Self = @This();
@@ -390,16 +390,17 @@ test "quadtree" {
 }
 
 test "quadtree raycast" {
+    const gpa = std.testing.allocator;
     var qtree: Quadtree(u32) = .{};
-    defer qtree.deinit(std.testing.allocator);
+    defer qtree.deinit(gpa);
 
-    try qtree.insert(std.testing.allocator, .{ 10, 10, 10, 10 }, 1);
-    try qtree.insert(std.testing.allocator, .{ 30, 10, 10, 10 }, 2);
-    try qtree.insert(std.testing.allocator, .{ 50, 10, 10, 10 }, 3);
-    try qtree.insert(std.testing.allocator, .{ 10, 30, 10, 10 }, 4);
-    try qtree.insert(std.testing.allocator, .{ 100, 100, 10, 10 }, 5);
+    try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 1);
+    try qtree.insert(gpa, .{ 30, 10, 10, 10 }, 2);
+    try qtree.insert(gpa, .{ 50, 10, 10, 10 }, 3);
+    try qtree.insert(gpa, .{ 10, 30, 10, 10 }, 4);
+    try qtree.insert(gpa, .{ 100, 100, 10, 10 }, 5);
 
-    var out = std.ArrayList(u32).init(std.testing.allocator);
+    var out = std.ArrayList(u32){};
     defer out.deinit();
 
     const ray_start = m.Vec{ 0, 15, 0, 0 };
