@@ -2,6 +2,8 @@
 
 Lommix's zig essentials. Each in a separate file for copy pasting.
 
+zig version: 0.15.1
+
 ## Content
 
 - Layout: responsive UI layout math.
