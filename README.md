@@ -12,3 +12,4 @@ zig version: 0.15.1
 - Easing: common easing functions.
 - ZMath: SIMD math lib (forked)
 - hashStr: simple & fast xor hashing.
+- SparseSet: dense data, sparse IDs. Always useful.
