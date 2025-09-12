@@ -36,8 +36,8 @@ pub const Easing = enum {
     smootherstep,
     step,
 
-    pub fn calc(self: *Easing, value: f32) f32 {
-        return switch (self.*) {
+    pub fn calc(self: Easing, value: f32) f32 {
+        return switch (self) {
             .linear => value,
             .sinIn => sinIn(value),
             .sinOut => sinOut(value),
