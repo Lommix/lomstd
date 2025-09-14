@@ -54,13 +54,12 @@ pub const Constraint = union(enum) {
 /// ││  0  │  1  │  2  │
 /// │└─────┴─────┴─────┘
 /// 0──────────────────X
-pub fn Row(area: Area, comptime constraints: anytype) [constraints.len]Area {
-    var areas: [constraints.len]Area = undefined;
-
+pub fn bufRow(area: Area, buf: []Area, constraints: []const Constraint) []Area {
+    std.debug.assert(constraints.len == buf.len);
     var total_fixed_width: f32 = 0;
     var fill_count: u32 = 0;
 
-    inline for (constraints) |constraint| {
+    for (constraints) |constraint| {
         switch (constraint) {
             .pixel => |width| total_fixed_width += width,
             .percent => |pct| total_fixed_width += area.width * pct,
@@ -73,14 +72,14 @@ pub fn Row(area: Area, comptime constraints: anytype) [constraints.len]Area {
 
     var current_x = area.x;
 
-    inline for (constraints, 0..) |constraint, i| {
+    for (constraints, 0..) |constraint, i| {
         const width = switch (constraint) {
             .pixel => |w| w,
             .percent => |pct| area.width * pct,
             .fill => fill_width,
         };
 
-        areas[i] = Area{
+        buf[i] = Area{
             .x = current_x,
             .y = area.y,
             .width = width,
@@ -90,7 +89,62 @@ pub fn Row(area: Area, comptime constraints: anytype) [constraints.len]Area {
         current_x += width;
     }
 
-    return areas;
+    return buf[0..constraints.len];
+}
+
+/// # Creates horizontal layout from left to right
+/// Y┌─────┬┬─────┬┬────┐
+/// ││  0  ││  1  ││ 2  │
+/// │└─────┴┴─────┴┴────┘
+/// 0──────────────────X
+pub fn bufRowGap(area: Area, buf: []Area, constraints: []const Constraint, gap: Constraint) []Area {
+    const gap_count = if (constraints.len > 1) constraints.len - 1 else 0;
+    const gap_size = switch (gap) {
+        .pixel => |g| g,
+        .percent => |pct| area.height * pct,
+        .fill => 0,
+    };
+    const total_gap_height = gap_size * @as(f32, @floatFromInt(gap_count));
+
+    var total_fixed_width: f32 = total_gap_height;
+    var fill_count: u32 = 0;
+
+    for (constraints) |constraint| {
+        switch (constraint) {
+            .pixel => |width| total_fixed_width += width,
+            .percent => |pct| total_fixed_width += area.width * pct,
+            .fill => fill_count += 1,
+        }
+    }
+
+    const remaining_width = area.width - total_fixed_width;
+    const fill_width = if (fill_count > 0) remaining_width / @as(f32, @floatFromInt(fill_count)) else 0;
+
+    var current_x = area.x;
+
+    for (constraints, 0..) |constraint, i| {
+        const width = switch (constraint) {
+            .pixel => |w| w,
+            .percent => |pct| area.width * pct,
+            .fill => fill_width,
+        };
+
+        buf[i] = Area{
+            .x = current_x,
+            .y = area.y,
+            .width = width,
+            .height = area.height,
+        };
+
+        // Add gap after each element except the last one
+        if (i < constraints.len - 1) {
+            current_x += gap_size;
+        }
+
+        current_x += width;
+    }
+
+    return buf[0..constraints.len];
 }
 
 /// # Creates vertical layout from top to bottom
@@ -102,13 +156,11 @@ pub fn Row(area: Area, comptime constraints: anytype) [constraints.len]Area {
 /// ││ 2 │
 /// │└───┘
 /// 0────X
-pub fn Column(area: Area, comptime constraints: anytype) [constraints.len]Area {
-    var areas: [constraints.len]Area = undefined;
-
+pub fn bufCol(area: Area, buf: []Area, constraints: []const Constraint) []Area {
     var total_fixed_height: f32 = 0;
     var fill_count: u32 = 0;
 
-    inline for (constraints) |constraint| {
+    for (constraints) |constraint| {
         switch (constraint) {
             .pixel => |height| total_fixed_height += height,
             .percent => |pct| total_fixed_height += area.height * pct,
@@ -121,7 +173,7 @@ pub fn Column(area: Area, comptime constraints: anytype) [constraints.len]Area {
 
     var current_y = area.y + area.height;
 
-    inline for (constraints, 0..) |constraint, i| {
+    for (constraints, 0..) |constraint, i| {
         const height = switch (constraint) {
             .pixel => |h| h,
             .percent => |pct| area.height * pct,
@@ -129,7 +181,7 @@ pub fn Column(area: Area, comptime constraints: anytype) [constraints.len]Area {
         };
 
         current_y -= height;
-        areas[i] = Area{
+        buf[i] = Area{
             .x = area.x,
             .y = current_y,
             .width = area.width,
@@ -137,21 +189,21 @@ pub fn Column(area: Area, comptime constraints: anytype) [constraints.len]Area {
         };
     }
 
-    return areas;
+    return buf[0..constraints.len];
 }
 
 /// # Creates vertical layout from top to bottom with gaps
 /// Y┌───┐
 /// ││ 0 │
-/// │├─G─┤
+/// │├───┤
+/// │├───┤
 /// ││ 1 │
-/// │├─G─┤
+/// │├───┤
+/// │├───┤
 /// ││ 2 │
 /// │└───┘
 /// 0────X
-pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [constraints.len]Area {
-    var areas: [constraints.len]Area = undefined;
-
+pub fn bufColGap(area: Area, buf: []Area, constraints: []const Constraint, gap: Constraint) []Area {
     const gap_count = if (constraints.len > 1) constraints.len - 1 else 0;
     const gap_size = switch (gap) {
         .pixel => |g| g,
@@ -163,7 +215,7 @@ pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [co
     var total_fixed_height: f32 = total_gap_height;
     var fill_count: u32 = 0;
 
-    inline for (constraints) |constraint| {
+    for (constraints) |constraint| {
         switch (constraint) {
             .pixel => |height| total_fixed_height += height,
             .percent => |pct| total_fixed_height += area.height * pct,
@@ -176,7 +228,7 @@ pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [co
 
     var current_y = area.y + area.height;
 
-    inline for (constraints, 0..) |constraint, i| {
+    for (constraints, 0..) |constraint, i| {
         const height = switch (constraint) {
             .pixel => |h| h,
             .percent => |pct| area.height * pct,
@@ -184,7 +236,7 @@ pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [co
         };
 
         current_y -= height;
-        areas[i] = Area{
+        buf[i] = Area{
             .x = area.x,
             .y = current_y,
             .width = area.width,
@@ -197,6 +249,64 @@ pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [co
         }
     }
 
+    return buf[0..constraints.len];
+}
+
+/// # Creates horizontal layout from left to right
+/// @comptime sugar
+/// Y┌─────┬─────┬─────┐
+/// ││  0  │  1  │  2  │
+/// │└─────┴─────┴─────┘
+/// 0──────────────────X
+pub fn Row(area: Area, comptime constraints: anytype) [constraints.len]Area {
+    var out: [constraints.len]Area = undefined;
+    _ = bufRow(area, &out, &constraints);
+    return out;
+}
+
+/// # Creates horizontal layout from left to right
+/// @comptime sugar
+/// Y┌─────┬┬─────┬┬────┐
+/// ││  0  ││  1  ││ 2  │
+/// │└─────┴┴─────┴┴────┘
+/// 0──────────────────X
+pub fn RowGap(area: Area, comptime constraints: anytype, gap: Constraint) [constraints.len]Area {
+    var areas: [constraints.len]Area = undefined;
+    _ = bufRowGap(area, &areas, &constraints, gap);
+    return areas;
+}
+
+/// # Creates vertical layout from top to bottom with gaps
+/// @comptime sugar
+/// Y┌───┐
+/// ││ 0 │
+/// │├───┤
+/// │├───┤
+/// ││ 1 │
+/// │├───┤
+/// │├───┤
+/// ││ 2 │
+/// │└───┘
+/// 0────X
+pub fn ColGap(area: Area, comptime constraints: anytype, gap: Constraint) [constraints.len]Area {
+    var areas: [constraints.len]Area = undefined;
+    _ = bufColGap(area, &areas, &constraints, gap);
+    return areas;
+}
+
+/// # Creates vertical layout from top to bottom
+/// @comptime sugar
+/// Y┌───┐
+/// ││ 0 │
+/// │├───┤
+/// ││ 1 │
+/// │├───┤
+/// ││ 2 │
+/// │└───┘
+/// 0────X
+pub fn Col(area: Area, comptime constraints: anytype) [constraints.len]Area {
+    var areas: [constraints.len]Area = undefined;
+    _ = bufCol(area, &areas, &constraints);
     return areas;
 }
 
@@ -209,9 +319,24 @@ pub fn ColumnGap(area: Area, comptime constraints: anytype, gap: Constraint) [co
 /// ││    B    │
 /// │└─────────┘
 /// 0─────────X
-pub fn Padding(area: Area, comptime left: Constraint, comptime right: Constraint, comptime top: Constraint, comptime bottom: Constraint) Area {
+pub fn Pad(area: Area, comptime left: Constraint, comptime right: Constraint, comptime top: Constraint, comptime bottom: Constraint) Area {
     const row = Row(area, .{ left, Constraint.fill, right });
-    const col = Column(row[1], .{ top, Constraint.fill, bottom });
+    const col = Col(row[1], .{ top, Constraint.fill, bottom });
+    return col[1];
+}
+
+/// # Creates area with custom padding on each side
+/// Y┌─────────┐
+/// ││    Y    │
+/// ││  ┌───┐  │
+/// ││X │ A │ X│
+/// ││  └───┘  │
+/// ││    Y    │
+/// │└─────────┘
+/// 0─────────X
+pub fn PadAxis(area: Area, comptime x: Constraint, comptime y: Constraint) Area {
+    const row = Row(area, .{ x, Constraint.fill, x });
+    const col = Col(row[1], .{ y, Constraint.fill, y });
     return col[1];
 }
 
@@ -224,7 +349,7 @@ pub fn Padding(area: Area, comptime left: Constraint, comptime right: Constraint
 /// 0─────────X
 pub fn Centered(area: Area, comptime width: Constraint, comptime heigth: Constraint) Area {
     const row = Row(area, .{ Constraint.fill, width, Constraint.fill });
-    const col = Column(row[1], .{ Constraint.fill, heigth, Constraint.fill });
+    const col = Col(row[1], .{ Constraint.fill, heigth, Constraint.fill });
     return col[1];
 }
 
@@ -237,8 +362,8 @@ pub fn Centered(area: Area, comptime width: Constraint, comptime heigth: Constra
 /// ││    P    │
 /// │└─────────┘
 /// 0─────────X
-pub fn PaddingAll(area: Area, comptime pad: Constraint) Area {
+pub fn PadAll(area: Area, comptime pad: Constraint) Area {
     const row = Row(area, .{ pad, Constraint.fill, pad });
-    const col = Column(row[1], .{ pad, Constraint.fill, pad });
+    const col = Col(row[1], .{ pad, Constraint.fill, pad });
     return col[1];
 }
