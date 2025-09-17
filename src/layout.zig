@@ -4,8 +4,8 @@ pub const Area = struct {
     const Self = @This();
     x: f32 = 0,
     y: f32 = 0,
-    width: f32,
-    height: f32,
+    width: f32 = 0,
+    height: f32 = 0,
 
     pub fn pad(self: Self, val: f32) Self {
         var s = self;
@@ -40,6 +40,37 @@ pub const Area = struct {
         s.width = @max(0, s.width - hw * 2);
         s.height = @max(0, s.height - hh * 2);
         return s;
+    }
+
+    pub fn intersect_point(self: *const Self, x: f32, y: f32) bool {
+        return self.x < x and self.y < y and self.x + self.width > x and self.y + self.height > y;
+    }
+
+    pub fn offset(self: Self, x: f32, y: f32) Self {
+        return Self{
+            .x = self.x + x,
+            .y = self.y + y,
+            .width = self.width,
+            .height = self.height,
+        };
+    }
+
+    pub fn grow(self: Self, percent: f32) Self {
+        return Self{
+            .x = self.x,
+            .y = self.y,
+            .width = self.width * percent,
+            .height = self.height * percent,
+        };
+    }
+
+    pub fn lerp(self: Self, lhs: *Self, r: f32) Self {
+        return Self{
+            .x = std.math.lerp(self.x, lhs.x, r),
+            .y = std.math.lerp(self.y, lhs.y, r),
+            .width = std.math.lerp(self.width, lhs.width, r),
+            .height = std.math.lerp(self.height, lhs.height, r),
+        };
     }
 };
 
