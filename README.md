@@ -1,6 +1,7 @@
 # lomstd
 
 Lommix's zig essentials. Each in a separate file for copy pasting.
+Mostly Gamedev related.
 
 zig version: 0.15.1
 
@@ -13,3 +14,7 @@ zig version: 0.15.1
 - ZMath: SIMD math lib (forked)
 - hashStr: simple & fast xor hashing.
 - SparseSet: dense data, sparse IDs. Always useful.
+- SlotMap: fixed index array.
+- SparseSlotMap: same as above, but backed by a dense array for fast iteration.
+- Zlay: Full ui layout engine.
+- Timer: Simple timer struct.
