@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Sparse Set, the regular
+/// Sparse Set, paginated
 pub fn SparseSet(comptime T: type) type {
     return struct {
         const Self = @This();

@@ -12,7 +12,7 @@ pub fn SparseSlotMap(comptime T: type) type {
         // ---------------
 
         const Self = @This();
-        const Handle = SlotMap(usize).Handle;
+        pub const Handle = SlotMap(usize).Handle;
 
         pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
             self.dense.deinit(gpa);
