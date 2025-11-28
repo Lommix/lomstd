@@ -78,6 +78,14 @@ pub const Constraint = union(enum) {
     pixel: f32,
     percent: f32,
     fill,
+
+    pub fn eval(self: Constraint, max: f32) f32 {
+        return switch (self) {
+            .fill => max,
+            .percent => |p| max * p,
+            .pixel => |p| p,
+        };
+    }
 };
 
 /// # Creates horizontal layout from left to right

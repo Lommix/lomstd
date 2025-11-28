@@ -6,3 +6,7 @@ pub const Math = @import("zmath.zig");
 pub const Qtree = @import("qtree.zig");
 pub const hashStr = @import("hash.zig").hashStr;
 pub const SparseSet = @import("sparse_set.zig").SparseSet;
+pub const SlotMap = @import("slotmap.zig").SlotMap;
+pub const SparseSlotMap = @import("sparse_slotmap.zig").SparseSlotMap;
+pub const Zlay = @import("zlay.zig");
+pub const Timer = @import("timer.zig");
