@@ -4,6 +4,8 @@ const tr = @import("tree.zig");
 const hashStr = @import("hash.zig").hashStr;
 const UiTree = tr.MultiTree(Node);
 
+// full responsive layout engine
+
 tree: UiTree = .{},
 states: std.AutoHashMapUnmanaged(u32, State) = .{},
 
@@ -12,7 +14,9 @@ pub const Node = struct {
     ctx: ?*anyopaque = null,
     style: Style = .{},
     computed: Area = .{},
+    /// user provided render function
     render: ?*const fn (gpa: std.mem.Allocator, node: *Node, ctx: ?*anyopaque) anyerror!void = null,
+    /// user provided size function
     size: *const fn (node: *Node) Area = &default_size,
 };
 

@@ -1,33 +1,21 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-/// # MultiTree
-/// a flat multi root tree structure for UI and similar
+/// A flat multi root tree structure for UI and similar backed by a dense node array
 pub fn MultiTree(comptime T: type) type {
     return struct {
-        const Self = @This();
-        pub const NodeID = u32;
-        pub const RelationID = u32;
-
-        const Slot = struct {
-            value: T,
-            link: Link,
-        };
-
-        const Link = struct {
-            first_child_relation_id: ?RelationID = null,
-            parent_id: ?NodeID = null,
-        };
-
-        pub const Relation = struct {
-            node_index: NodeID,
-            next_child_relation_id: ?RelationID = null,
-            last_child_relation_id: ?RelationID = null,
-        };
-
+        // ---------------
         nodes: std.MultiArrayList(Slot) = .{},
         relation: std.ArrayList(Relation) = .{},
         roots: std.ArrayList(NodeID) = .{},
+        // ---------------
+
+        const Self = @This();
+        pub const NodeID = u32;
+        pub const RelationID = u32;
+        pub const Slot = struct { value: T, link: Link };
+        pub const Link = struct { first_child_relation_id: ?RelationID = null, parent_id: ?NodeID = null };
+        pub const Relation = struct { node_index: NodeID, next_child_relation_id: ?RelationID = null, last_child_relation_id: ?RelationID = null };
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
             if (std.meta.hasMethod(T, "deinit")) {
@@ -190,7 +178,7 @@ pub fn MultiTree(comptime T: type) type {
 
             while (rel_id) |current_rel| {
                 const child_node = self.relation.items[current_rel].node_index;
-                self.collectDescendants(gpa,child_node, list);
+                self.collectDescendants(gpa, child_node, list);
                 list.append(gpa, child_node) catch unreachable;
                 rel_id = self.relation.items[current_rel].next_child_relation_id;
             }
@@ -344,7 +332,7 @@ pub fn MultiTree(comptime T: type) type {
                     const root_link = self.tree.nodes.items(.link)[self.root]; // self.root);
 
                     if (root_link.first_child_relation_id) |id| {
-                        self.stack.append(self.gpa,id) catch unreachable;
+                        self.stack.append(self.gpa, id) catch unreachable;
                     }
 
                     self.passed_root = true;
@@ -358,11 +346,11 @@ pub fn MultiTree(comptime T: type) type {
                 const rel = &self.tree.relation.items[next_id];
 
                 if (rel.next_child_relation_id) |next_sibling| {
-                    self.stack.append(self.gpa,next_sibling) catch unreachable;
+                    self.stack.append(self.gpa, next_sibling) catch unreachable;
                 }
 
                 if (self.tree.nodes.items(.link)[rel.node_index].first_child_relation_id) |next_child| {
-                    self.stack.append(self.gpa,next_child) catch unreachable;
+                    self.stack.append(self.gpa, next_child) catch unreachable;
                 }
 
                 return Entry{
@@ -433,7 +421,7 @@ pub fn MultiTree(comptime T: type) type {
                 }
 
                 while (self.next_layer.pop()) |n| {
-                    self.current_layer.append(self.gpa,n) catch unreachable;
+                    self.current_layer.append(self.gpa, n) catch unreachable;
                 }
 
                 return self.next();
@@ -766,7 +754,7 @@ test "remove multiple nodes sequentially" {
         // Get the first child and remove it
         var iter = tree.IterateChildren(root);
         if (iter.next()) |child| {
-            tree.remove(alloc,child.node_id);
+            tree.remove(alloc, child.node_id);
         }
     }
 
@@ -836,7 +824,7 @@ test "remove with complex sibling relationships" {
     defer values.deinit(alloc);
 
     while (iter.next()) |entry| {
-        try values.append(alloc,entry.value.*);
+        try values.append(alloc, entry.value.*);
     }
 
     try expect(values.items.len == 3);

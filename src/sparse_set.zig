@@ -3,11 +3,13 @@ const std = @import("std");
 /// Sparse Set, paginated
 pub fn SparseSet(comptime T: type) type {
     return struct {
-        const Self = @This();
-        const MAX_PAGE_SIZE: u32 = 1024;
+        // ----------------
         dense: std.ArrayList(T) = .{},
         dense_to_sparse: std.ArrayList(u32) = .{},
-        sparse: std.ArrayList([MAX_PAGE_SIZE]?u32) = .{},
+        sparse: std.ArrayList([1024]?u32) = .{},
+        // ----------------
+
+        const Self = @This();
 
         pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
             self.sparse.deinit(gpa);
@@ -21,7 +23,7 @@ pub fn SparseSet(comptime T: type) type {
 
             // Ensure sparse array has enough pages
             while (self.sparse.items.len <= page_index) {
-                try self.sparse.append(gpa, [_]?u32{null} ** MAX_PAGE_SIZE);
+                try self.sparse.append(gpa, [_]?u32{null} ** 1024);
             }
 
             if (self.sparse.items[page_index][page_slot]) |existing_dense_id| {

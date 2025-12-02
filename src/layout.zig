@@ -1,5 +1,7 @@
 const std = @import("std");
 
+// Some primitve layout functions
+
 pub const Area = struct {
     const Self = @This();
     x: f32 = 0,

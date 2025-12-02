@@ -1,5 +1,4 @@
 const std = @import("std");
-
 const Self = @This();
 pub const Direction = enum { forward, backward };
 pub const Mode = enum { normal, pingpong };
