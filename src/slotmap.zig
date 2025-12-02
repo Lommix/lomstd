@@ -86,6 +86,50 @@ pub fn SlotMap(comptime T: type) type {
                 .id = handle.id,
             });
         }
+
+        /// !!Only for primitave data, pointers are not resolved!!
+        pub fn serialize(self: *const Self, writer: *std.Io.Writer) !void {
+            try writer.writeInt(u32, @intCast(self.items.items.len), .little);
+
+            for (self.items.items) |slot| {
+                try writer.writeAll(std.mem.asBytes(&slot));
+            }
+
+            try writer.writeInt(u32, @intCast(self.unused.items.len), .little);
+            for (self.unused.items) |handle| {
+                try writer.writeAll(std.mem.asBytes(&handle));
+            }
+
+            try writer.flush();
+        }
+
+        pub fn deserialize(gpa: std.mem.Allocator, reader: *std.Io.Reader) !Self {
+            const items_size = try reader.takeInt(u32, .little);
+
+            var self = Self{
+                .items = .{},
+                .unused = .{},
+            };
+
+            for (0..items_size) |_| {
+                var slot: Slot = undefined;
+                const slot_bytes = std.mem.asBytes(&slot);
+                const bytes = try reader.take(slot_bytes.len);
+                @memcpy(slot_bytes, bytes);
+                try self.items.append(gpa, slot);
+            }
+
+            const unused_size = try reader.takeInt(u32, .little);
+            for (0..unused_size) |_| {
+                var handle: Handle = undefined;
+                const handle_bytes = std.mem.asBytes(&handle);
+                const bytes = try reader.take(handle_bytes.len);
+                @memcpy(handle_bytes, bytes);
+                try self.unused.append(gpa, handle);
+            }
+
+            return self;
+        }
     };
 }
 
@@ -228,4 +272,41 @@ test "get const pointer" {
     }
 
     try std.testing.expectEqual(sm.get(h2), 100);
+}
+
+test "serialize deserialize" {
+    const Some = struct {
+        a: u32,
+        b: f32,
+        c: [4]u8,
+    };
+
+    var sm = SlotMap(Some){};
+    defer sm.deinit(std.testing.allocator);
+
+    var handles: [10]SlotMap(Some).Handle = undefined;
+
+    for (0..10) |i| {
+        handles[i] = try sm.insert(std.testing.allocator, .{
+            .a = @intCast(i),
+            .b = @floatFromInt(i * 10),
+            .c = @splat(@intCast(i)),
+        });
+    }
+
+    var buffer: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buffer);
+    try sm.serialize(&w);
+
+    var r = std.Io.Reader.fixed(&buffer);
+    var sm2 = try SlotMap(Some).deserialize(std.testing.allocator, &r);
+    defer sm2.deinit(std.testing.allocator);
+
+    for (0..0) |i| {
+        const val = sm2.get(handles[i]).?;
+        try std.testing.expect(val.a == @as(u32, @intCast(i)));
+        try std.testing.expect(val.b == @as(f32, @floatFromInt(i * 10)));
+        const b: [4]u8 = @splat(@intCast(i));
+        try std.testing.expect(std.mem.eql(u8, val.c, b));
+    }
 }
