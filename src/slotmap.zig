@@ -1,4 +1,5 @@
 const std = @import("std");
+const s2b = @import("s2b.zig");
 
 pub const SlotState = union(enum) {
     unused,
@@ -92,12 +93,12 @@ pub fn SlotMap(comptime T: type) type {
             try writer.writeInt(u32, @intCast(self.items.items.len), .little);
 
             for (self.items.items) |slot| {
-                try writer.writeAll(std.mem.asBytes(&slot));
+                try s2b.binarySerialize(SlotValue(T), slot, writer);
             }
 
             try writer.writeInt(u32, @intCast(self.unused.items.len), .little);
             for (self.unused.items) |handle| {
-                try writer.writeAll(std.mem.asBytes(&handle));
+                try s2b.binarySerialize(Handle, handle, writer);
             }
 
             try writer.flush();
@@ -112,19 +113,13 @@ pub fn SlotMap(comptime T: type) type {
             };
 
             for (0..items_size) |_| {
-                var slot: Slot = undefined;
-                const slot_bytes = std.mem.asBytes(&slot);
-                const bytes = try reader.take(slot_bytes.len);
-                @memcpy(slot_bytes, bytes);
-                try self.items.append(gpa, slot);
+                const val = try s2b.binaryDeserialize(Slot, gpa, reader);
+                try self.items.append(gpa, val);
             }
 
             const unused_size = try reader.takeInt(u32, .little);
             for (0..unused_size) |_| {
-                var handle: Handle = undefined;
-                const handle_bytes = std.mem.asBytes(&handle);
-                const bytes = try reader.take(handle_bytes.len);
-                @memcpy(handle_bytes, bytes);
+                const handle = try s2b.binaryDeserialize(Handle, gpa, reader);
                 try self.unused.append(gpa, handle);
             }
 
@@ -275,22 +270,49 @@ test "get const pointer" {
 }
 
 test "serialize deserialize" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const En = enum {
+        a,
+        b,
+    };
+
+    const Un = union(En) {
+        a: f32,
+        b: u8,
+    };
+    const Other = struct {
+        a: ?u32 = null,
+        b: f32 = 0.5,
+    };
     const Some = struct {
         a: u32,
         b: f32,
         c: [4]u8,
+        e: En = .a,
+        f: Un = .{ .a = 0.5 },
+        o: Other = .{},
+        s: []u8,
+        z: *u32,
     };
 
     var sm = SlotMap(Some){};
-    defer sm.deinit(std.testing.allocator);
-
     var handles: [10]SlotMap(Some).Handle = undefined;
 
     for (0..10) |i| {
-        handles[i] = try sm.insert(std.testing.allocator, .{
+        const s = try gpa.alloc(u8, 10);
+        for (0..10) |k| s[k] = 0;
+
+        const z = try gpa.create(u32);
+        z.* = 69;
+
+        handles[i] = try sm.insert(gpa, .{
             .a = @intCast(i),
             .b = @floatFromInt(i * 10),
             .c = @splat(@intCast(i)),
+            .s = s,
+            .z = z,
         });
     }
 
@@ -299,14 +321,15 @@ test "serialize deserialize" {
     try sm.serialize(&w);
 
     var r = std.Io.Reader.fixed(&buffer);
-    var sm2 = try SlotMap(Some).deserialize(std.testing.allocator, &r);
-    defer sm2.deinit(std.testing.allocator);
+    var sm2 = try SlotMap(Some).deserialize(gpa, &r);
 
-    for (0..0) |i| {
+    for (0..10) |i| {
         const val = sm2.get(handles[i]).?;
         try std.testing.expect(val.a == @as(u32, @intCast(i)));
         try std.testing.expect(val.b == @as(f32, @floatFromInt(i * 10)));
         const b: [4]u8 = @splat(@intCast(i));
-        try std.testing.expect(std.mem.eql(u8, val.c, b));
+        try std.testing.expect(std.mem.eql(u8, &val.c, &b));
+        try std.testing.expectEqual(val.s[0], 0);
+        try std.testing.expectEqual(val.z.*, 69);
     }
 }

@@ -18,3 +18,4 @@ zig version: 0.15.1
 - SparseSlotMap: same as above, but backed by a dense array for fast iteration.
 - Zlay: Full ui layout engine.
 - Timer: Simple timer struct.
+- comptime any binary serializer/deserialzer.

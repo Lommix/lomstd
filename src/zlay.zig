@@ -1,13 +1,14 @@
 const std = @import("std");
 const m = @import("zmath.zig");
 const tr = @import("tree.zig");
-const hashStr = @import("hash.zig").hashStr;
+// const hashStr = @import("hash.zig").hashStr;
 const UiTree = tr.MultiTree(Node);
 
 // full responsive layout engine
 
 tree: UiTree = .{},
-states: std.AutoHashMapUnmanaged(u32, State) = .{},
+states: std.ArrayList(State) = .{},
+hash_to_index: std.AutoHashMapUnmanaged(u32, usize) = .{},
 
 pub const Node = struct {
     state_hash: ?u32 = null,
@@ -21,6 +22,8 @@ pub const Node = struct {
 };
 
 pub const State = struct {
+    hash: u32,
+    used: bool = false,
     flags: Flags = .{},
     hover_dt: f32 = 0,
     pressed_dt: f32 = 0,
@@ -179,13 +182,13 @@ pub const Style = struct {
     align_x: Align = .start,
     align_y: Align = .start,
     delay: f32 = 300,
-    bg: m.Vec = @splat(1),
+    bg: m.Vec = @splat(0),
     fg: m.Vec = @splat(1),
     rect: ?m.Vec = null,
     patch: m.Vec = @splat(0),
     top: f32 = 0,
     left: f32 = 0,
-    font_size: f32 = 18,
+    font_size: f32 = 16,
 };
 
 pub const Display = union(enum) {
@@ -209,10 +212,11 @@ pub const Context = struct {
 
 pub fn compute_ui(
     self: *@This(),
+    world_gpa: std.mem.Allocator,
     dt: f32,
     mouse: MouseState,
 ) !void {
-    var buf: [1024]u8 = undefined;
+    var buf: [4048]u8 = undefined;
     var buf_alloc = std.heap.FixedBufferAllocator.init(&buf);
     const gpa = buf_alloc.allocator();
 
@@ -256,19 +260,15 @@ pub fn compute_ui(
         // 6.) Position
         for (nodes.items) |id| {
             compute_position(&self.tree, id);
-            self.compute_state(mouse, dt, id);
+            self.compute_state(world_gpa, mouse, dt, id);
         }
 
-        // cleanup state
-        var state_itr = self.states.iterator();
-        var list: std.ArrayList(u32) = .{};
-        while (state_itr.next()) |en| {
-            if (!en.value_ptr.flags.updated) {
-                try list.append(gpa, en.key_ptr.*);
+        for (0..self.states.items.len) |i| {
+            const index = self.states.items.len - i - 1;
+            if (!self.states.items[index].used) {
+                _ = self.states.swapRemove(index);
             }
         }
-
-        for (list.items) |id| _ = self.states.remove(id);
     }
 }
 
@@ -279,16 +279,16 @@ pub const MouseState = struct {
     y: f32 = 0,
 };
 
-fn compute_state(self: *@This(), mouse: MouseState, delta: f32, id: u32) void {
+fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delta: f32, id: u32) void {
     const node = self.tree.getValue(id);
     const hash = node.state_hash orelse return;
-    const state = self.states.getPtr(hash) orelse return;
+    const state = self.getState(gpa, hash) catch return;
 
     const dt = delta * (1 / (node.style.delay / 1000));
     const mx = mouse.x;
     const my = mouse.y;
 
-    state.flags.hovered = node.computed.intersect(mx, my);
+    state.flags.hovered = node.computed.intersect(mx, -my);
     state.flags.pressed = mouse.pressed and state.flags.hovered;
     state.flags.updated = true;
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
@@ -485,4 +485,14 @@ pub fn render(self: *@This(), gpa: std.mem.Allocator) !void {
             try func(gpa, node, null);
         }
     }
+}
+
+pub fn getState(self: *@This(), gpa: std.mem.Allocator, hash: u32) !*State {
+    const res = try self.hash_to_index.getOrPut(gpa, hash);
+    if (!res.found_existing) {
+        try self.states.append(gpa, .{ .hash = hash, .used = true });
+        res.value_ptr.* = self.states.items.len - 1;
+    }
+    self.states.items[res.value_ptr.*].used = true;
+    return &self.states.items[res.value_ptr.*];
 }

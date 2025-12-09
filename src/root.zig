@@ -9,4 +9,6 @@ pub const SparseSet = @import("sparse_set.zig").SparseSet;
 pub const SlotMap = @import("slotmap.zig").SlotMap;
 pub const SparseSlotMap = @import("sparse_slotmap.zig").SparseSlotMap;
 pub const Zlay = @import("zlay.zig");
-pub const Timer = @import("timer.zig");
+pub const Timer = @import("timer.zig").Timer;
+pub const binaryDeserialize = @import("s2b.zig").binaryDeserialize;
+pub const binarySerialize = @import("s2b.zig").binarySerialize;

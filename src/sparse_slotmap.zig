@@ -1,4 +1,5 @@
 const std = @import("std");
+const s2b = @import("s2b.zig");
 
 const SlotMap = @import("slotmap.zig").SlotMap;
 
@@ -22,6 +23,10 @@ pub fn SparseSlotMap(comptime T: type) type {
 
         pub fn items(self: *Self) []T {
             return self.dense.items;
+        }
+
+        pub fn handles(self: *Self) []Handle {
+            return self.dense_to_handle.items;
         }
 
         pub fn itemsConst(self: *const Self) []const T {
@@ -70,13 +75,13 @@ pub fn SparseSlotMap(comptime T: type) type {
             // Serialize dense array length and contents
             try writer.writeInt(u32, @intCast(self.dense.items.len), .little);
             for (self.dense.items) |item| {
-                try writer.writeAll(std.mem.asBytes(&item));
+                try s2b.binarySerialize(T, item, writer);
             }
 
             // Serialize dense_to_handle mapping
             try writer.writeInt(u32, @intCast(self.dense_to_handle.items.len), .little);
             for (self.dense_to_handle.items) |handle| {
-                try writer.writeAll(std.mem.asBytes(&handle));
+                try s2b.binarySerialize(Handle, handle, writer);
             }
 
             try writer.flush();
@@ -95,21 +100,15 @@ pub fn SparseSlotMap(comptime T: type) type {
             // Deserialize dense array
             const dense_len = try reader.takeInt(u32, .little);
             for (0..dense_len) |_| {
-                var item: T = undefined;
-                const item_bytes = std.mem.asBytes(&item);
-                const bytes = try reader.take(item_bytes.len);
-                @memcpy(item_bytes, bytes);
+                const item = try s2b.binaryDeserialize(T, gpa, reader);
                 try self.dense.append(gpa, item);
             }
 
             // Deserialize dense_to_handle mapping
             const handle_count = try reader.takeInt(u32, .little);
             for (0..handle_count) |_| {
-                var handle: Handle = undefined;
-                const handle_bytes = std.mem.asBytes(&handle);
-                const bytes = try reader.take(handle_bytes.len);
-                @memcpy(handle_bytes, bytes);
-                try self.dense_to_handle.append(gpa, handle);
+                const item = try s2b.binaryDeserialize(Handle, gpa, reader);
+                try self.dense_to_handle.append(gpa, item);
             }
 
             return self;
