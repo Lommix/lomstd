@@ -295,6 +295,7 @@ test "serialize deserialize" {
         o: Other = .{},
         s: []u8,
         z: *u32,
+        l: std.ArrayList(u32) = .{},
     };
 
     var sm = SlotMap(Some){};
@@ -307,12 +308,17 @@ test "serialize deserialize" {
         const z = try gpa.create(u32);
         z.* = 69;
 
+        var list = std.ArrayList(u32){};
+        try list.append(gpa, 420);
+        try list.append(gpa, 421);
+
         handles[i] = try sm.insert(gpa, .{
             .a = @intCast(i),
             .b = @floatFromInt(i * 10),
             .c = @splat(@intCast(i)),
             .s = s,
             .z = z,
+            .l = list,
         });
     }
 
@@ -331,5 +337,8 @@ test "serialize deserialize" {
         try std.testing.expect(std.mem.eql(u8, &val.c, &b));
         try std.testing.expectEqual(val.s[0], 0);
         try std.testing.expectEqual(val.z.*, 69);
+
+        try std.testing.expectEqual(val.l.items[0], 420);
+        try std.testing.expectEqual(val.l.items[1], 421);
     }
 }

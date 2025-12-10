@@ -11,9 +11,11 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
             const bytes: [4]u8 = @bitCast(val);
             try w.writeAll(&bytes);
         },
-        .@"enum" => {
-            const bytes: []const u8 = std.mem.asBytes(&val);
-            try w.writeAll(bytes);
+        .@"enum" => |e| {
+            if (e.fields.len == 0) return;
+
+            const i: u32 = @intFromEnum(val);
+            try w.writeInt(u32, i, .little);
         },
         .@"union" => |un| {
             const tag = std.meta.activeTag(val);
@@ -46,9 +48,7 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
             switch (ptr.size) {
                 .slice => {
                     try binarySerialize(u32, @intCast(val.len), w);
-                    for (val) |el| {
-                        try binarySerialize(ptr.child, el, w);
-                    }
+                    for (val) |el| try binarySerialize(ptr.child, el, w);
                 },
                 .one => {
                     try binarySerialize(ptr.child, val.*, w);
@@ -59,8 +59,13 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
             }
         },
         .@"struct" => |stru| {
-            inline for (stru.fields) |field| {
-                try binarySerialize(field.type, @field(val, field.name), w);
+            switch (stru.layout) {
+                .auto => {
+                    inline for (stru.fields) |field| {
+                        try binarySerialize(field.type, @field(val, field.name), w);
+                    }
+                },
+                else => try w.writeAll(std.mem.asBytes(&val)),
             }
         },
         else => {
@@ -92,9 +97,7 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
                 .slice => {
                     const size = try binaryDeserialize(u32, gpa, reader);
                     const slice = try gpa.alloc(ptr.child, @intCast(size));
-                    for (0..size) |i| {
-                        slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
-                    }
+                    for (0..size) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
                     return slice;
                 },
                 .one => {
@@ -108,12 +111,11 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
                 },
             }
         },
-        .@"enum" => {
-            const bytes = try reader.take(@sizeOf(T));
-            var val: T = undefined;
-            const val_bytes: []u8 = std.mem.asBytes(&val);
-            @memcpy(val_bytes[0..@sizeOf(T)], bytes);
-            return val;
+        .@"enum" => |e| {
+            if (e.fields.len == 0) return undefined;
+
+            const i = try reader.takeInt(u32, .little);
+            return @enumFromInt(i);
         },
         .@"union" => |un| {
             const tag_byte = try reader.takeByte();
@@ -132,6 +134,7 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
             return error.InvalidUnionTag;
         },
         .array => |arr| {
+            @setEvalBranchQuota(3200);
             var a: [arr.len]arr.child = undefined;
             inline for (0..arr.len) |i| {
                 a[i] = try binaryDeserialize(arr.child, gpa, reader);
@@ -149,10 +152,18 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
         },
         .@"struct" => |obj| {
             var val: T = undefined;
-
-            inline for (obj.fields) |field| {
-                @field(val, field.name) = try binaryDeserialize(field.type, gpa, reader);
+            switch (obj.layout) {
+                .auto => {
+                    inline for (obj.fields) |field| {
+                        @field(val, field.name) = try binaryDeserialize(field.type, gpa, reader);
+                    }
+                },
+                else => {
+                    const bytes = try reader.take(@sizeOf(T));
+                    @memcpy(std.mem.asBytes(&val), bytes);
+                },
             }
+
             return val;
         },
         else => return error.UnsupportedType,
