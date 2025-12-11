@@ -38,6 +38,8 @@ const Flags = packed struct {
     exited: bool = false,
     focus: bool = false,
     updated: bool = false,
+    active: bool = false,
+    dragged: bool = false,
 };
 
 pub const Area = struct {
@@ -186,8 +188,8 @@ pub const Style = struct {
     fg: m.Vec = @splat(1),
     rect: ?m.Vec = null,
     patch: m.Vec = @splat(0),
-    top: f32 = 0,
-    left: f32 = 0,
+    top: Val = .shrink,
+    left: Val = .shrink,
     font_size: f32 = 16,
 };
 
@@ -213,17 +215,14 @@ pub const Context = struct {
 pub fn compute_ui(
     self: *@This(),
     world_gpa: std.mem.Allocator,
+    frame_gpa: std.mem.Allocator,
     dt: f32,
     mouse: MouseState,
 ) !void {
-    var buf: [4048]u8 = undefined;
-    var buf_alloc = std.heap.FixedBufferAllocator.init(&buf);
-    const gpa = buf_alloc.allocator();
-
     for (self.tree.roots.items) |root_id| {
         var nodes: std.ArrayList(u32) = .{};
-        var it = self.tree.IterateBreathedFirst(gpa, root_id);
-        while (it.next()) |entry| try nodes.append(gpa, entry.node_id);
+        var it = self.tree.IterateBreathedFirst(frame_gpa, root_id);
+        while (it.next()) |entry| try nodes.append(frame_gpa, entry.node_id);
         // const root = ui.res.tree.getValue(root_id);
         // _ = root; // autofix
 
@@ -275,6 +274,7 @@ pub fn compute_ui(
 pub const MouseState = struct {
     pressed: bool = false,
     just_pressed: bool = false,
+    just_released: bool = false,
     x: f32 = 0,
     y: f32 = 0,
 };
@@ -294,6 +294,10 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
     state.flags.just_released = mouse.just_pressed and state.flags.hovered;
 
+    if (state.flags.just_pressed) state.flags.dragged = true;
+    if (mouse.just_released) state.flags.dragged = false;
+
+    if (state.flags.just_pressed) state.flags.active = !state.flags.active;
     if (state.flags.pressed) state.pressed_dt = @min(1, state.pressed_dt + dt) else state.pressed_dt = @max(0, state.pressed_dt - dt);
     if (state.flags.hovered) state.hover_dt = @min(1, state.hover_dt + dt) else state.hover_dt = @max(0, state.hover_dt - dt);
 }
@@ -434,9 +438,20 @@ fn compute_position(tree: *UiTree, id: u32) void {
     while (child_itr.next()) |child| {
         child.value.computed.z = node.computed.z + 1;
 
+        const left = switch (child.value.style.left) {
+            .perc => |p| p * node.computed.width,
+            .px => |p| p,
+            else => 0,
+        };
+        const top = switch (child.value.style.top) {
+            .perc => |p| p * node.computed.height,
+            .px => |p| p,
+            else => 0,
+        };
+
         if (child.value.style.position == .absolute) {
-            child.value.computed.x = node.computed.x + child.value.computed.x + child.value.style.padding.left + child.value.style.left;
-            child.value.computed.y = node.computed.y - child.value.computed.y - child.value.style.padding.top - child.value.style.top;
+            child.value.computed.x = node.computed.x + child.value.computed.x + child.value.style.padding.left + left;
+            child.value.computed.y = node.computed.y - child.value.computed.y - child.value.style.padding.top - top;
             continue;
         }
 
