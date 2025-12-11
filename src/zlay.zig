@@ -196,7 +196,7 @@ pub const Style = struct {
 pub const Display = union(enum) {
     row,
     col,
-    grid: u32,
+    grid: ?u32,
 };
 
 pub const Align = enum {
