@@ -196,7 +196,7 @@ pub const Style = struct {
 pub const Display = union(enum) {
     row,
     col,
-    grid: ?u32,
+    grid: u32,
 };
 
 pub const Align = enum {
@@ -309,6 +309,55 @@ fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     var value: f32 = 0;
     const should_sum = x_axis and node.style.display == .row or !x_axis and node.style.display == .col;
 
+    // Handle grid layout separately
+    if (node.style.display == .grid) {
+        var count: u32 = 0;
+        var current: f32 = 0;
+        var rows: u32 = 0;
+        const columns = node.style.display.grid;
+        var max_cols: bool = false;
+
+        while (child_itr.next()) |child| {
+            if (x_axis) {
+                current += child.value.computed.width;
+                count += 1;
+                if (count >= columns) {
+                    value = @max(current, value);
+                    current = 0;
+                    count = 0;
+                    rows += 1;
+                    max_cols = true;
+                }
+            } else {
+                current = @max(current, child.value.computed.height);
+                count += 1;
+                if (count >= columns) {
+                    value += current;
+                    current = 0;
+                    count = 0;
+                    rows += 1;
+                    max_cols = true;
+                }
+            }
+        }
+
+        if (x_axis) {
+            value = @max(current, value);
+            node.computed.width = value + node.style.padding.getX();
+            if (max_cols) {
+                node.computed.width += @as(f32, @floatFromInt(columns)) * node.style.gap;
+            } else {
+                node.computed.width += @as(f32, @floatFromInt(count)) * node.style.gap;
+            }
+        } else {
+            value += current;
+            node.computed.height = value + node.style.padding.getY();
+            node.computed.height += @as(f32, @floatFromInt(rows)) * node.style.gap;
+        }
+
+        return;
+    }
+
     while (child_itr.next()) |child| {
         if (child.value.style.position == .absolute) continue;
 
@@ -325,8 +374,6 @@ fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     value += if (should_sum) node.style.gap * @as(f32, @floatFromInt(child_count -| 1)) else 0;
     // pad
     value += if (x_axis) node.style.padding.getX() else node.style.padding.getY();
-
-    // const target = if(x_axis) &node.computed.width else &node.computed.height;
 
     if (x_axis) {
         node.computed.width = @max(value, @max(node.style.width.get(), node.computed.width));
@@ -394,6 +441,10 @@ fn compute_position(tree: *UiTree, id: u32) void {
     var total_x: f32 = 0;
     var total_y: f32 = 0;
 
+    var col_count: u32 = 0;
+    var col_w: f32 = 0;
+    var col_h: f32 = 0;
+
     while (child_itr.next()) |child| {
         child_count += 1;
         child.value.computed.z = node.computed.z + 1;
@@ -409,8 +460,30 @@ fn compute_position(tree: *UiTree, id: u32) void {
                 total_y += child.value.computed.height;
                 total_x = @max(total_x, child.value.computed.width);
             },
-            .grid => {},
+            .grid => |columns| {
+                col_w += child.value.computed.width;
+                col_h = @max(col_h, child.value.computed.height);
+
+                col_count += 1;
+
+                if (col_count >= columns) {
+                    total_x = @max(total_x, col_w);
+                    total_y += col_h;
+                    col_count = 0;
+                    col_w = 0;
+                    col_h = 0;
+                }
+            },
         }
+    }
+
+    // finishe grid
+    if (node.style.display == .grid) {
+        total_x = @max(total_x, col_w);
+        total_y += col_h;
+        col_h = 0;
+        col_w = 0;
+        col_count = 0;
     }
 
     // calc x start
@@ -429,7 +502,10 @@ fn compute_position(tree: *UiTree, id: u32) void {
     switch (node.style.display) {
         .row => total_x += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
         .col => total_y += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
-        .grid => {},
+        .grid => {
+            std.debug.print("total: {d} w:  {d}\n", .{ total_x, node.computed.width });
+            // x += (node.computed.width - node.style.padding.left - total_x) *  0.5;
+        },
     }
 
     child_itr.reset();
@@ -488,7 +564,22 @@ fn compute_position(tree: *UiTree, id: u32) void {
                     gap_count -|= 1;
                 }
             },
-            .grid => {},
+
+            .grid => |columns| {
+                col_count += 1;
+                x += child.value.computed.width + node.style.gap;
+                col_w += child.value.computed.width + node.style.gap;
+                col_h = @max(col_h, child.value.computed.height);
+
+                if (col_count >= columns) {
+                    y -= col_h + node.style.gap;
+                    x -= col_w;
+
+                    col_w = 0;
+                    col_h = 0;
+                    col_count = 0;
+                }
+            },
         }
     }
 }
