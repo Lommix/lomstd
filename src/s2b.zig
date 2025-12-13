@@ -8,14 +8,14 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
         .int => try w.writeInt(T, val, .little),
         .bool => try w.writeByte(if (val) 1 else 0),
         .float => {
-            const bytes: [4]u8 = @bitCast(val);
+            const bytes: [8]u8 = @bitCast(@as(f64, @floatCast(val)));
             try w.writeAll(&bytes);
         },
         .@"enum" => |e| {
             if (e.fields.len == 0) return;
 
-            const i: u32 = @intFromEnum(val);
-            try w.writeInt(u32, i, .little);
+            const i: u64 = @intFromEnum(val);
+            try w.writeInt(u64, i, .little);
         },
         .@"union" => |un| {
             const tag = std.meta.activeTag(val);
@@ -47,7 +47,7 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
         .pointer => |ptr| {
             switch (ptr.size) {
                 .slice => {
-                    try binarySerialize(u32, @intCast(val.len), w);
+                    try binarySerialize(u64, @intCast(val.len), w);
                     for (val) |el| try binarySerialize(ptr.child, el, w);
                 },
                 .one => {
@@ -86,16 +86,16 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
             return b > 0;
         },
         .float => {
-            const bytes = try reader.take(4);
-            var val: f32 = 0;
+            const bytes = try reader.take(8);
+            var val: f64 = 0;
             const val_bytes: []u8 = std.mem.asBytes(&val);
-            @memcpy(val_bytes[0..4], bytes);
-            return val;
+            @memcpy(val_bytes[0..8], bytes);
+            return @floatCast(val);
         },
         .pointer => |ptr| {
             switch (ptr.size) {
                 .slice => {
-                    const size = try binaryDeserialize(u32, gpa, reader);
+                    const size = try binaryDeserialize(u64, gpa, reader);
                     const slice = try gpa.alloc(ptr.child, @intCast(size));
                     for (0..size) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
                     return slice;
@@ -114,12 +114,11 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
         .@"enum" => |e| {
             if (e.fields.len == 0) return undefined;
 
-            const i = try reader.takeInt(u32, .little);
+            const i = try reader.takeInt(u64, .little);
             return @enumFromInt(i);
         },
         .@"union" => |un| {
             const tag_byte = try reader.takeByte();
-
             inline for (un.fields, 0..) |field, tag_idx| {
                 if (tag_byte == tag_idx) {
                     if (field.type == void) {

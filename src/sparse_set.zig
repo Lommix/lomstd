@@ -53,6 +53,7 @@ pub fn SparseSet(comptime T: type) type {
                 try self.dense.append(gpa, data);
                 try self.dense_to_sparse.append(gpa, id);
                 const dense_id = self.dense.items.len - 1;
+                std.debug.assert(dense_id < (1 << 31)); // SlotID.id is u31 - hard limit
                 self.sparse.items[page_index][page_slot] = SlotID.new(@intCast(dense_id));
                 return &self.dense.items[dense_id];
             }
@@ -63,6 +64,7 @@ pub fn SparseSet(comptime T: type) type {
             const page_slot = id & 1023;
             if (page_index >= self.sparse.items.len) return null;
             const dense_id = self.sparse.items[page_index][page_slot].get() orelse return null;
+            std.debug.assert(dense_id < self.dense.items.len); // Dense ID must be valid
             return &self.dense.items[dense_id];
         }
 
@@ -71,6 +73,7 @@ pub fn SparseSet(comptime T: type) type {
             const page_slot = id & 1023;
             if (page_index >= self.sparse.items.len) return null;
             const dense_id = self.sparse.items[page_index][page_slot].get() orelse return null;
+            std.debug.assert(dense_id < self.dense.items.len); // Dense ID must be valid
             return &self.dense.items[dense_id];
         }
 
@@ -81,15 +84,23 @@ pub fn SparseSet(comptime T: type) type {
         pub fn remove(self: *Self, id: u32) void {
             const page_index = id >> 10;
             const page_slot = id & 1023;
-            // check len
+
+            // Bounds check - prevent out-of-bounds access if page was never allocated
+            if (page_index >= self.sparse.items.len) return;
+
             const dense_id = self.sparse.items[page_index][page_slot].get() orelse return;
             self.sparse.items[page_index][page_slot] = SlotID.NULL;
+
+            // Validate dense_id is in bounds
+            std.debug.assert(dense_id < self.dense.items.len);
+            std.debug.assert(dense_id < self.dense_to_sparse.items.len);
 
             // do not swap on last item in list
             const back_id = self.dense_to_sparse.items[self.dense.items.len - 1];
             if (back_id != id) {
                 const back_page_index = back_id >> 10;
                 const back_page_slot = back_id & 1023;
+                std.debug.assert(back_page_index < self.sparse.items.len); // Back ID must be valid
                 self.sparse.items[back_page_index][back_page_slot] = SlotID.new(dense_id);
             }
 

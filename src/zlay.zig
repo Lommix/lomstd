@@ -486,6 +486,7 @@ fn compute_position(tree: *UiTree, id: u32) void {
         col_count = 0;
     }
 
+
     // calc x start
     var x = switch (node.style.align_x) {
         .center => node.computed.x + node.computed.width * 0.5 - total_x * 0.5,
@@ -502,10 +503,7 @@ fn compute_position(tree: *UiTree, id: u32) void {
     switch (node.style.display) {
         .row => total_x += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
         .col => total_y += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
-        .grid => {
-            std.debug.print("total: {d} w:  {d}\n", .{ total_x, node.computed.width });
-            // x += (node.computed.width - node.style.padding.left - total_x) *  0.5;
-        },
+        .grid => {},
     }
 
     child_itr.reset();
