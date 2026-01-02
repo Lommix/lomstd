@@ -209,12 +209,25 @@ pub const Align = enum {
 
 pub const Context = struct {
     const Self = @This();
+    const MAXDEPTH: u32 = 32;
     hash: u32,
     parent: UiTree.NodeID,
+    hash_stack: [MAXDEPTH]u32 = undefined,
+    hash_stack_len: u32 = 0,
 
     pub fn salt(self: *Context, hash: u32) u32 {
+        std.debug.assert(self.hash_stack_len < MAXDEPTH);
         self.hash ^= hash;
+        self.hash_stack[self.hash_stack_len] = hash;
+        self.hash_stack_len += 1;
         return self.hash;
+    }
+
+    pub fn pop(self: *Context) void {
+        if (self.hash_stack_len == 0) return;
+
+        self.hash_stack_len -|= 1;
+        self.hash ^= self.hash_stack[self.hash_stack_len];
     }
 };
 
@@ -607,3 +620,6 @@ pub fn getState(self: *@This(), gpa: std.mem.Allocator, hash: u32) !*State {
     self.states.items[res.value_ptr.*].used = true;
     return &self.states.items[res.value_ptr.*];
 }
+
+// TODO:
+// move Context and basic builder funcs here
