@@ -108,7 +108,7 @@ pub fn MultiTree(comptime T: type) type {
         }
 
         pub fn removeChild(self: *Self, parent: NodeID, child: NodeID) !void {
-            var rel_id = try self.getFirstRelation(parent);
+            var rel_id = self.getFirstRelation(parent) orelse return error.HasNoChildren;
 
             while (self.relation.items[rel_id].next_child_relation_id) |next| {
                 if (self.relation.items[rel_id].node_index == child) {

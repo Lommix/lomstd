@@ -1,5 +1,7 @@
 const std = @import("std");
 
+/// Serialzie any data structures, including pointers, arrays, maps
+/// to a simple binary format.
 pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
     const Info = @typeInfo(T);
 
@@ -54,7 +56,7 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
                     try binarySerialize(ptr.child, val.*, w);
                 },
                 else => {
-                    return error.UnsupportedPointer;
+                    return error.UnsupportedPointerType;
                 },
             }
         },
@@ -69,11 +71,13 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
             }
         },
         else => {
-            return error.UnsupportedType;
+            return error.UnsupportedFieldType;
         },
     }
 }
 
+/// Deserialzie any data structures, including pointers, arrays, maps
+/// form a simple binary format.
 pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.Io.Reader) !T {
     const Info = @typeInfo(T);
     switch (Info) {
@@ -97,7 +101,7 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
                 .slice => {
                     const size = try binaryDeserialize(u64, gpa, reader);
                     const slice = try gpa.alloc(ptr.child, @intCast(size));
-                    for (0..size) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
+                    for (0..@as(usize, @intCast(size))) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
                     return slice;
                 },
                 .one => {

@@ -12,3 +12,8 @@ pub const Zlay = @import("zlay.zig");
 pub const Timer = @import("timer.zig").Timer;
 pub const binaryDeserialize = @import("s2b.zig").binaryDeserialize;
 pub const binarySerialize = @import("s2b.zig").binarySerialize;
+
+const bt = @import("btree.zig");
+pub const BTree = bt.BTree;
+pub const fBTree = bt.fBTree;
+pub const iBTree = bt.iBTree;

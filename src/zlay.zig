@@ -9,6 +9,7 @@ const UiTree = tr.MultiTree(Node);
 tree: UiTree = .{},
 states: std.ArrayList(State) = .{},
 hash_to_index: std.AutoHashMapUnmanaged(u32, usize) = .{},
+mouse_in_ui: bool = false,
 
 pub const Node = struct {
     state_hash: ?u32 = null,
@@ -165,7 +166,7 @@ pub const Position = enum {
     absolute,
 };
 
-fn default_size(node: *Node) Area {
+pub fn default_size(node: *Node) Area {
     return .{
         .x = 0,
         .y = 0,
@@ -191,6 +192,7 @@ pub const Style = struct {
     top: Val = .shrink,
     left: Val = .shrink,
     font_size: f32 = 16,
+    z: f32 = 0,
 };
 
 pub const Display = union(enum) {
@@ -209,7 +211,11 @@ pub const Context = struct {
     const Self = @This();
     hash: u32,
     parent: UiTree.NodeID,
-    position: Position = .relative,
+
+    pub fn salt(self: *Context, hash: u32) u32 {
+        self.hash ^= hash;
+        return self.hash;
+    }
 };
 
 pub fn compute_ui(
@@ -219,6 +225,8 @@ pub fn compute_ui(
     dt: f32,
     mouse: MouseState,
 ) !void {
+    self.mouse_in_ui = false;
+
     for (self.tree.roots.items) |root_id| {
         var nodes: std.ArrayList(u32) = .{};
         var it = self.tree.IterateBreathedFirst(frame_gpa, root_id);
@@ -288,11 +296,13 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     const mx = mouse.x;
     const my = mouse.y;
 
-    state.flags.hovered = node.computed.intersect(mx, -my);
+    state.flags.hovered = node.computed.intersect(mx, my);
     state.flags.pressed = mouse.pressed and state.flags.hovered;
     state.flags.updated = true;
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
     state.flags.just_released = mouse.just_pressed and state.flags.hovered;
+
+    self.mouse_in_ui = self.mouse_in_ui | state.flags.hovered;
 
     if (state.flags.just_pressed) state.flags.dragged = true;
     if (mouse.just_released) state.flags.dragged = false;
@@ -447,7 +457,7 @@ fn compute_position(tree: *UiTree, id: u32) void {
 
     while (child_itr.next()) |child| {
         child_count += 1;
-        child.value.computed.z = node.computed.z + 1;
+        child.value.computed.z = node.computed.z + 1 + child.value.style.z;
 
         if (child.value.style.position == .absolute) continue;
 
@@ -486,7 +496,6 @@ fn compute_position(tree: *UiTree, id: u32) void {
         col_count = 0;
     }
 
-
     // calc x start
     var x = switch (node.style.align_x) {
         .center => node.computed.x + node.computed.width * 0.5 - total_x * 0.5,
@@ -510,8 +519,6 @@ fn compute_position(tree: *UiTree, id: u32) void {
 
     var gap_count = child_count -| 1;
     while (child_itr.next()) |child| {
-        child.value.computed.z = node.computed.z + 1;
-
         const left = switch (child.value.style.left) {
             .perc => |p| p * node.computed.width,
             .px => |p| p,
@@ -582,11 +589,11 @@ fn compute_position(tree: *UiTree, id: u32) void {
     }
 }
 
-pub fn render(self: *@This(), gpa: std.mem.Allocator) !void {
+pub fn render(self: *@This(), gpa: std.mem.Allocator, ctx: ?*anyopaque) !void {
     for (self.tree.nodes.items(.value)) |*node| {
         // render: ?*const fn (gpa: std.mem.Allocator, node: *Node, ctx: ?*anyopaque) anyerror!void = null,
         if (node.render) |func| {
-            try func(gpa, node, null);
+            try func(gpa, node, ctx);
         }
     }
 }
