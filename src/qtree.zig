@@ -37,8 +37,8 @@ const Direction = enum {
 pub fn Quadtree(comptime T: type) type {
     return struct {
         const Tree = tree.MultiTree(Node(T));
-        const MINSIZE: u32 = 100;
-        const MAXITEMS: u32 = 32;
+        const MINSIZE: u32 = 32;
+        const MAXITEMS: u32 = 1;
         const Self = @This();
 
         count: u32 = 0,
@@ -209,17 +209,17 @@ pub fn Quadtree(comptime T: type) type {
             }
         }
 
-        pub fn query(self: *const Self, gpa: Allocator, aabb: Rect, values: *std.ArrayList(T)) !void {
+        pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(T)) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.queryAt(gpa, id, aabb, values);
+            try self.queryAt(id, aabb, values);
         }
 
-        pub fn queryAt(self: *const Self, gpa: Allocator, id: Tree.NodeID, aabb: Rect, values: *std.ArrayList(T)) !void {
+        pub fn queryAt(self: *const Self, id: Tree.NodeID, aabb: Rect, values: *std.ArrayList(T)) !void {
             const root_node = self.tree.getValueConst(id);
             switch (root_node.val) {
                 .leaf => |*list| {
                     for (list.items) |slot| if (intersect(slot.aabb, aabb)) {
-                        try values.append(gpa, slot.v);
+                        values.appendBounded(slot.v) catch return;
                     };
                     return;
                 },
@@ -228,7 +228,52 @@ pub fn Quadtree(comptime T: type) type {
 
             const res = intersect4(aabb, root_node.bounds);
             const children = self.childrenInOrder(id);
-            for (0..4) |i| if (res[i]) try self.queryAt(gpa, children[i], aabb, values);
+            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values);
+        }
+
+        pub const Filter = struct {
+            const FilterFn = *const fn (filter: *const Filter, *const T) bool;
+            mask: u32 = 0,
+            ctx: [16]u8 = undefined,
+            ctx_len: u32 = 0,
+            func: ?FilterFn = null,
+
+            pub fn new(ctx: anytype, func: ?FilterFn) Filter {
+                var self = Filter{ .func = func };
+                self.ctx_len = @sizeOf(@TypeOf(ctx));
+                @memcpy(self.ctx[0..self.ctx_len], std.mem.asBytes(&ctx));
+                return self;
+            }
+        };
+
+        pub fn queryFiltered(self: *const Self, aabb: Rect, values: *std.ArrayList(T), filter: Filter) !void {
+            const id = self.root orelse return error.EmptyTree;
+            try self.queryAtFiltered(id, aabb, values, filter);
+        }
+
+        pub fn queryAtFiltered(
+            self: *const Self,
+            id: Tree.NodeID,
+            aabb: Rect,
+            values: *std.ArrayList(T),
+            filter: Filter,
+        ) !void {
+            const root_node = self.tree.getValueConst(id);
+            switch (root_node.val) {
+                .leaf => |*list| {
+                    for (list.items) |*slot| {
+                        if (!intersect(slot.aabb, aabb)) continue;
+                        if (filter.func) |func| if (!func(&filter, &slot.v)) continue;
+                        values.appendBounded(slot.v) catch return;
+                    }
+                    return;
+                },
+                .branch => {},
+            }
+
+            const res = intersect4(aabb, root_node.bounds);
+            const children = self.childrenInOrder(id);
+            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values);
         }
 
         pub fn raycast(self: *const Self, gpa: Allocator, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T)) !void {
@@ -296,11 +341,6 @@ pub fn Quadtree(comptime T: type) type {
     };
 }
 
-// pub inline fn extendList(area: Rect, aabb: Rect) [3]Rect {
-//     var ret: [3]Rect = undefined;
-//     return ret;
-// }
-
 pub inline fn intersect(a: Rect, b: Rect) bool {
     const x_overlap = a[0] < (b[0] + b[2]) and (a[0] + a[2]) > b[0];
     const y_overlap = a[1] < (b[1] + b[3]) and (a[1] + a[3]) > b[1];
@@ -314,7 +354,6 @@ inline fn parseDir(vec: Vec) Direction {
     if (vec[0] == 1 and vec[1] == -1) return Direction.bottomRight;
 
     @panic("impossible");
-    // @panic(std.fmt.comptimePrint("unkown dir: {any}", .{vec}));
 }
 
 /// quadtree 4x intersect in cw
@@ -343,12 +382,12 @@ pub inline fn intersect4(query: Rect, area: Rect) @Vector(4, bool) {
     const query_4w = vecs(query[2]);
     const query_4h = vecs(query[3]);
 
-    const c1: u4 = @bitCast(query_4x < (x_group + w_group));
-    const c2: u4 = @bitCast((query_4x + query_4w) > x_group);
-    const c3: u4 = @bitCast(query_4y < (y_group + h_group));
-    const c4: u4 = @bitCast((query_4y + query_4h) > y_group);
+    const c1 = query_4x < (x_group + w_group);
+    const c2 = (query_4x + query_4w) > x_group;
+    const c3 = query_4y < (y_group + h_group);
+    const c4 = (query_4y + query_4h) > y_group;
 
-    return @bitCast(c1 & c2 & c3 & c4);
+    return c1 & c2 & c3 & c4;
 }
 
 pub inline fn rayIntersectsRect(ray_start: Vec, ray_end: Vec, rect: Rect) bool {

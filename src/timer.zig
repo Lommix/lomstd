@@ -1,10 +1,11 @@
 const std = @import("std");
-pub const Direction = enum { forward, backward };
-pub const Mode = enum { normal, pingpong };
-pub const Repeat = union(enum) { inf, count: u32 };
 
 pub const Timer = struct {
     const Self = @This();
+
+    pub const Direction = enum { forward, backward };
+    pub const Mode = enum { normal, pingpong };
+    pub const Repeat = union(enum) { inf, count: u32 };
 
     elapsed: f32 = 0,
     duration: f32 = 1,
