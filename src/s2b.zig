@@ -34,6 +34,11 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
         .array => |arr| {
             for (val) |el| try binarySerialize(arr.child, el, w);
         },
+        .vector => |vec| {
+            for (0..vec.len) |i| {
+                try binarySerialize(vec.child, val[i], w);
+            }
+        },
         .optional => |opt| {
             var byte: u8 = 0;
             if (val != null) byte = 1;
@@ -71,6 +76,7 @@ pub fn binarySerialize(comptime T: type, val: T, w: *std.Io.Writer) !void {
             }
         },
         else => {
+            std.log.warn("ty: {s}", .{@typeName(T)});
             return error.UnsupportedFieldType;
         },
     }
@@ -141,6 +147,13 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
             var a: [arr.len]arr.child = undefined;
             inline for (0..arr.len) |i| {
                 a[i] = try binaryDeserialize(arr.child, gpa, reader);
+            }
+            return a;
+        },
+        .vector => |vec| {
+            var a: [vec.len]vec.child = undefined;
+            inline for (0..vec.len) |i| {
+                a[i] = try binaryDeserialize(vec.child, gpa, reader);
             }
             return a;
         },

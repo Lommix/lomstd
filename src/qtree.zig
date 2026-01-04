@@ -35,7 +35,12 @@ const Direction = enum {
 };
 
 /// Quadtree
-pub fn Quadtree(comptime T: type, MINSIZE: comptime_int, MAXITEMS: comptime_int) type {
+pub fn Quadtree(
+    comptime T: type,
+    comptime CMP: fn (a: T, b: T) bool,
+    MINSIZE: comptime_int,
+    MAXITEMS: comptime_int,
+) type {
     return struct {
         const Tree = tree.MultiTree(Node(T));
         const Self = @This();
@@ -216,26 +221,7 @@ pub fn Quadtree(comptime T: type, MINSIZE: comptime_int, MAXITEMS: comptime_int)
 
         pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(T), mask: u32) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.queryAt(id, aabb, values, mask);
-        }
-
-        pub fn queryAt(self: *const Self, id: Tree.NodeID, aabb: Rect, values: *std.ArrayList(T), mask: u32) !void {
-            const root_node = self.tree.getValueConst(id);
-            switch (root_node.val) {
-                .leaf => |*list| {
-                    for (list.items) |slot| {
-                        if (!intersect(slot.aabb, aabb)) continue;
-                        if ((slot.mask & mask) == 0) continue;
-                        values.appendBounded(slot.v) catch return;
-                    }
-                    return;
-                },
-                .branch => {},
-            }
-
-            const res = intersect4(aabb, root_node.bounds);
-            const children = self.childrenInOrder(id);
-            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values, mask);
+            try self.queryAtFiltered(id, aabb, values, mask, .{});
         }
 
         pub const Filter = struct {
@@ -260,10 +246,12 @@ pub fn Quadtree(comptime T: type, MINSIZE: comptime_int, MAXITEMS: comptime_int)
             const root_node = self.tree.getValueConst(id);
             switch (root_node.val) {
                 .leaf => |*list| {
-                    for (list.items) |*slot| {
+                    blk: for (list.items) |*slot| {
                         if (!intersect(slot.aabb, aabb)) continue;
                         if ((slot.mask & mask) == 0) continue;
                         if (filter.func) |func| if (!func(&filter, &slot.v)) continue;
+                        for (values.items) |t| if (CMP(t, slot.v)) continue :blk;
+
                         values.appendBounded(slot.v) catch return;
                     }
                     return;
