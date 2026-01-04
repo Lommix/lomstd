@@ -233,17 +233,8 @@ pub fn Quadtree(comptime T: type) type {
 
         pub const Filter = struct {
             const FilterFn = *const fn (filter: *const Filter, *const T) bool;
-            mask: u32 = 0,
-            ctx: [16]u8 = undefined,
-            ctx_len: u32 = 0,
+            ctx: ?*anyopaque = null,
             func: ?FilterFn = null,
-
-            pub fn new(ctx: anytype, func: ?FilterFn) Filter {
-                var self = Filter{ .func = func };
-                self.ctx_len = @sizeOf(@TypeOf(ctx));
-                @memcpy(self.ctx[0..self.ctx_len], std.mem.asBytes(&ctx));
-                return self;
-            }
         };
 
         pub fn queryFiltered(self: *const Self, aabb: Rect, values: *std.ArrayList(T), filter: Filter) !void {
