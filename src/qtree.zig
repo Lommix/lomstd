@@ -35,11 +35,9 @@ const Direction = enum {
 };
 
 /// Quadtree
-pub fn Quadtree(comptime T: type) type {
+pub fn Quadtree(comptime T: type, MINSIZE: comptime_int, MAXITEMS: comptime_int) type {
     return struct {
         const Tree = tree.MultiTree(Node(T));
-        const MINSIZE: u32 = 32;
-        const MAXITEMS: u32 = 1;
         const Self = @This();
 
         count: u32 = 0,
@@ -49,7 +47,7 @@ pub fn Quadtree(comptime T: type) type {
         pub fn insert(self: *Self, gpa: Allocator, bounds: Rect, value: T, mask: u32) !void {
             const root = self.root orelse blk: {
                 const id = try self.tree.root(gpa, Node(T){
-                    .bounds = .{ -1024, -1024, 2048, 2048 },
+                    .bounds = .{ -1024, -1024, 1024, 1024 },
                 });
                 self.root = id;
                 break :blk id;
@@ -84,22 +82,24 @@ pub fn Quadtree(comptime T: type) type {
             // has children or leaf?
             switch (node.val) {
                 .leaf => |*ar| {
-                    const needs_split = (ar.items.len > MAXITEMS) and (node.bounds[2] > MINSIZE); // or depth < 6;
+                    const needs_split = (ar.items.len > MAXITEMS) and ((node.bounds[2] - node.bounds[0]) > MINSIZE); // or depth < 6;
                     // const needs_split = depth < 5;
 
                     if (needs_split) {
-                        const x = node.bounds[0];
-                        const y = node.bounds[1];
-                        const hw = node.bounds[2] * 0.5;
-                        const hh = node.bounds[3] * 0.5;
+                        const min_x = node.bounds[0];
+                        const min_y = node.bounds[1];
+                        const max_x = node.bounds[2];
+                        const max_y = node.bounds[3];
+                        const mid_x = (min_x + max_x) * 0.5;
+                        const mid_y = (min_y + max_y) * 0.5;
 
                         // -------------
                         // create children
                         // cw order
-                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ x, y, hw, hh } }); //bottom left
-                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ x, y + hh, hw, hh } }); //top left
-                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ x + hw, y + hh, hw, hh } }); //top right
-                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ x + hw, y, hw, hh } }); //bottom right
+                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ min_x, min_y, mid_x, mid_y } }); //bottom left
+                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ min_x, mid_y, mid_x, max_y } }); //top left
+                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ mid_x, mid_y, max_x, max_y } }); //top right
+                        _ = try self.tree.insert(allocator, id, Node(T){ .bounds = .{ mid_x, min_y, max_x, mid_y } }); //bottom right
 
                         var n = self.tree.getValue(id);
                         var list = n.val.leaf;
@@ -128,10 +128,12 @@ pub fn Quadtree(comptime T: type) type {
                             //TODO: skip for now
                             return;
                         }
-                        const _x = node.bounds[0];
-                        const _y = node.bounds[1];
-                        const _w = node.bounds[2];
-                        const _h = node.bounds[3];
+                        const min_x = node.bounds[0];
+                        const min_y = node.bounds[1];
+                        const max_x = node.bounds[2];
+                        const max_y = node.bounds[3];
+                        const width = max_x - min_x;
+                        const height = max_y - min_y;
 
                         const dir = bounds - node.bounds;
                         const dirN = parseDir(std.math.sign(dir));
@@ -141,12 +143,12 @@ pub fn Quadtree(comptime T: type) type {
                                 // |0|0|
                                 // |#|0|
 
-                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ _x, _y, _w * 2, _h * 2 } });
+                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ min_x, min_y, max_x + width, max_y + height } });
 
                                 try self.tree.appendChild(allocator, new_parent_id, id); // bottom left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _x, _y + _h, _w, _h } }); // top left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _x + _w, _y + _h, _w, _h } }); //top right
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _x + _w, _y, _w, _h } }); //bottom right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ min_x, max_y, max_x, max_y + height } }); // top left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ max_x, max_y, max_x + width, max_y + height } }); //top right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ max_x, min_y, max_x + width, max_y } }); //bottom right
 
                                 self.root = new_parent_id;
                                 try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
@@ -155,15 +157,14 @@ pub fn Quadtree(comptime T: type) type {
                                 // |#|0|
                                 // |0|0|
 
-                                const _nx = _x;
-                                const _ny = _y - _h;
+                                const new_min_y = min_y - height;
 
-                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ _nx, _ny, _w * 2, _h * 2 } });
+                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ min_x, new_min_y, max_x + width, max_y } });
 
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx, _ny, _w, _h } }); // bottom left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ min_x, new_min_y, max_x, min_y } }); // bottom left
                                 try self.tree.appendChild(allocator, new_parent_id, id); // top left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny + _h, _w, _h } }); //top right
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny, _w, _h } }); //bottom right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ max_x, min_y, max_x + width, max_y } }); //top right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ max_x, new_min_y, max_x + width, min_y } }); //bottom right
 
                                 self.root = new_parent_id;
                                 try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
@@ -172,15 +173,15 @@ pub fn Quadtree(comptime T: type) type {
                                 // |0|#|
                                 // |0|0|
 
-                                const _nx = _x - _w;
-                                const _ny = _y - _h;
+                                const new_min_x = min_x - width;
+                                const new_min_y = min_y - height;
 
-                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ _x - _w, _y - _h, _w * 2, _h * 2 } });
+                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ new_min_x, new_min_y, max_x, max_y } });
 
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx, _ny, _w, _h } }); // bottom left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx, _ny + _h, _w, _h } }); // bottom left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ new_min_x, new_min_y, min_x, min_y } }); // bottom left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ new_min_x, min_y, min_x, max_y } }); // top left
                                 try self.tree.appendChild(allocator, new_parent_id, id); // top right
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny, _w, _h } }); //bottom right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ min_x, new_min_y, max_x, min_y } }); //bottom right
 
                                 self.root = new_parent_id;
                                 try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
@@ -189,14 +190,13 @@ pub fn Quadtree(comptime T: type) type {
                                 // |0|0|
                                 // |0|#|
 
-                                const _nx = _x - _w;
-                                const _ny = _y;
+                                const new_min_x = min_x - width;
 
-                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ _x - _w, _y, _w * 2, _h * 2 } });
+                                const new_parent_id = try self.tree.root(allocator, Node(T){ .bounds = .{ new_min_x, min_y, max_x, max_y + height } });
 
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx, _ny, _w, _h } }); // bottom left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx, _ny + _h, _w, _h } }); // bottom left
-                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny + _h, _w, _h } }); //top right
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ new_min_x, min_y, min_x, max_y } }); // bottom left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ new_min_x, max_y, min_x, max_y + height } }); // top left
+                                _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ min_x, max_y, max_x, max_y + height } }); //top right
                                 try self.tree.appendChild(allocator, new_parent_id, id);
 
                                 self.root = new_parent_id;
@@ -344,8 +344,8 @@ pub fn Quadtree(comptime T: type) type {
 }
 
 pub inline fn intersect(a: Rect, b: Rect) bool {
-    const x_overlap = a[0] < (b[0] + b[2]) and (a[0] + a[2]) > b[0];
-    const y_overlap = a[1] < (b[1] + b[3]) and (a[1] + a[3]) > b[1];
+    const x_overlap = a[0] < b[2] and a[2] > b[0];
+    const y_overlap = a[1] < b[3] and a[3] > b[1];
     return x_overlap and y_overlap;
 }
 
@@ -367,27 +367,29 @@ inline fn parseDir(vec: Vec) Direction {
 /// o = xy
 /// x = hw
 /// cw order
-/// rect layout: {x, y, w, h}
+/// rect layout: {min_x, min_y, max_x, max_y}
 pub inline fn intersect4(query: Rect, area: Rect) @Vector(4, bool) {
-    const x = area[0];
-    const y = area[1];
-    const w = area[2];
-    const h = area[3];
+    const min_x = area[0];
+    const min_y = area[1];
+    const max_x = area[2];
+    const max_y = area[3];
+    const mid_x = (min_x + max_x) * 0.5;
+    const mid_y = (min_y + max_y) * 0.5;
 
-    const x_group = Vec{ x, x, x + w * 0.5, x + w * 0.5 };
-    const y_group = Vec{ y, y + h * 0.5, y + h * 0.5, y };
-    const w_group = vecs(w * 0.5);
-    const h_group = vecs(h * 0.5);
+    const min_x_group = Vec{ min_x, min_x, mid_x, mid_x };
+    const min_y_group = Vec{ min_y, mid_y, mid_y, min_y };
+    const max_x_group = Vec{ mid_x, mid_x, max_x, max_x };
+    const max_y_group = Vec{ mid_y, max_y, max_y, mid_y };
 
-    const query_4x = vecs(query[0]);
-    const query_4y = vecs(query[1]);
-    const query_4w = vecs(query[2]);
-    const query_4h = vecs(query[3]);
+    const query_min_x = vecs(query[0]);
+    const query_min_y = vecs(query[1]);
+    const query_max_x = vecs(query[2]);
+    const query_max_y = vecs(query[3]);
 
-    const c1 = query_4x < (x_group + w_group);
-    const c2 = (query_4x + query_4w) > x_group;
-    const c3 = query_4y < (y_group + h_group);
-    const c4 = (query_4y + query_4h) > y_group;
+    const c1 = query_min_x < max_x_group;
+    const c2 = query_max_x > min_x_group;
+    const c3 = query_min_y < max_y_group;
+    const c4 = query_max_y > min_y_group;
 
     return c1 & c2 & c3 & c4;
 }
@@ -399,7 +401,7 @@ pub inline fn rayIntersectsRect(ray_start: Vec, ray_end: Vec, rect: Rect) bool {
     if (dx == 0 and dy == 0) return false;
 
     const rect_min = Vec{ rect[0], rect[1], 0, 0 };
-    const rect_max = Vec{ rect[0] + rect[2], rect[1] + rect[3], 0, 0 };
+    const rect_max = Vec{ rect[2], rect[3], 0, 0 };
 
     const inv_dx = if (dx != 0) 1.0 / dx else std.math.inf(f32);
     const inv_dy = if (dy != 0) 1.0 / dy else std.math.inf(f32);
@@ -417,14 +419,14 @@ pub inline fn rayIntersectsRect(ray_start: Vec, ray_end: Vec, rect: Rect) bool {
 
 test "quadtree" {
     const gpa = std.testing.allocator;
-    var qtree: Quadtree(u32) = .{};
+    var qtree: Quadtree(u32, 8, 4) = .{};
     defer qtree.deinit(std.testing.allocator);
 
     for (0..100) |_| {
         try qtree.insert(gpa, .{ 0, 0, 50, 50 }, 69, 0xFFFFFFFF);
-        try qtree.insert(gpa, .{ 10, 0, 10, 10 }, 70, 0xFFFFFFFF);
-        try qtree.insert(gpa, .{ 0, 10, 10, 10 }, 71, 0xFFFFFFFF);
-        try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 72, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 10, 0, 20, 10 }, 70, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 0, 10, 10, 20 }, 71, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 10, 10, 20, 20 }, 72, 0xFFFFFFFF);
     }
 
     var out = std.ArrayList(u32){};
@@ -438,14 +440,14 @@ test "quadtree" {
 
 test "quadtree raycast" {
     const gpa = std.testing.allocator;
-    var qtree: Quadtree(u32) = .{};
+    var qtree: Quadtree(u32, 8, 4) = .{};
     defer qtree.deinit(gpa);
 
-    try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 1, 0xFFFFFFFF);
-    try qtree.insert(gpa, .{ 30, 10, 10, 10 }, 2, 0xFFFFFFFF);
-    try qtree.insert(gpa, .{ 50, 10, 10, 10 }, 3, 0xFFFFFFFF);
-    try qtree.insert(gpa, .{ 10, 30, 10, 10 }, 4, 0xFFFFFFFF);
-    try qtree.insert(gpa, .{ 100, 100, 10, 10 }, 5, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 10, 10, 20, 20 }, 1, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 30, 10, 40, 20 }, 2, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 50, 10, 60, 20 }, 3, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 10, 30, 20, 40 }, 4, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 100, 100, 110, 110 }, 5, 0xFFFFFFFF);
 
     var out = std.ArrayList(u32){};
     defer out.deinit(gpa);
@@ -454,8 +456,8 @@ test "quadtree raycast" {
     const ray_end = Vec{ 60, 15, 0, 0 };
     try qtree.raycast(gpa, ray_start, ray_end, &out, 0xFFFFFFFF);
 
-    // Item 2 at (30, 10, 10, 10) straddles the x=32 split, so it appears in 2 leaves
-    try std.testing.expect(out.items.len == 4);
+    // Ray at y=15 intersects items 1, 2, 3 (all at y: 10-20)
+    try std.testing.expect(out.items.len == 3);
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{1}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{2}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{3}));
@@ -466,8 +468,8 @@ test "quadtree raycast" {
     const ray_end2 = Vec{ 15, 40, 0, 0 };
     try qtree.raycast(gpa, ray_start2, ray_end2, &out, 0xFFFFFFFF);
 
-    // Item 4 at (10, 30, 10, 10) straddles a split, so it appears in 2 leaves
-    try std.testing.expect(out.items.len == 3);
+    // Ray at x=15 intersects items 1 (x: 10-20, y: 10-20) and 4 (x: 10-20, y: 30-40)
+    try std.testing.expect(out.items.len == 2);
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{1}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{4}));
 
