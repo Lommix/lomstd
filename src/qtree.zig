@@ -23,6 +23,7 @@ pub fn Slot(comptime T: type) type {
     return struct {
         aabb: Rect,
         v: T,
+        mask: u32,
     };
 }
 
@@ -45,7 +46,7 @@ pub fn Quadtree(comptime T: type) type {
         tree: Tree = .{},
         root: ?Tree.NodeID = null,
 
-        pub fn insert(self: *Self, gpa: Allocator, bounds: Rect, value: T) !void {
+        pub fn insert(self: *Self, gpa: Allocator, bounds: Rect, value: T, mask: u32) !void {
             const root = self.root orelse blk: {
                 const id = try self.tree.root(gpa, Node(T){
                     .bounds = .{ -1024, -1024, 2048, 2048 },
@@ -54,7 +55,7 @@ pub fn Quadtree(comptime T: type) type {
                 break :blk id;
             };
 
-            try self.insertAt(gpa, bounds, value, root, 0);
+            try self.insertAt(gpa, bounds, value, mask, root, 0);
             self.count += 1;
         }
 
@@ -76,7 +77,7 @@ pub fn Quadtree(comptime T: type) type {
             self.count = 0;
         }
 
-        pub fn insertAt(self: *Self, allocator: Allocator, bounds: Rect, value: T, id: Tree.NodeID, depth: u32) !void {
+        pub fn insertAt(self: *Self, allocator: Allocator, bounds: Rect, value: T, mask: u32, id: Tree.NodeID, depth: u32) !void {
             const node = self.tree.getValue(id);
             const intersecs = intersect4(bounds, node.bounds);
 
@@ -106,12 +107,17 @@ pub fn Quadtree(comptime T: type) type {
                         n.val = .branch;
 
                         while (list.pop()) |slot| {
-                            try self.insertAt(allocator, slot.aabb, slot.v, id, depth + 1);
+                            try self.insertAt(allocator, slot.aabb, slot.v, slot.mask, id, depth + 1);
                         }
+
+                        // Insert the new item that triggered the split
+                        try self.insertAt(allocator, bounds, value, mask, id, depth + 1);
+                        return;
                     } else {
                         try ar.append(allocator, Slot(T){
                             .aabb = bounds,
                             .v = value,
+                            .mask = mask,
                         });
                     }
                 },
@@ -122,7 +128,6 @@ pub fn Quadtree(comptime T: type) type {
                             //TODO: skip for now
                             return;
                         }
-
                         const _x = node.bounds[0];
                         const _y = node.bounds[1];
                         const _w = node.bounds[2];
@@ -144,7 +149,7 @@ pub fn Quadtree(comptime T: type) type {
                                 _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _x + _w, _y, _w, _h } }); //bottom right
 
                                 self.root = new_parent_id;
-                                try self.insertAt(allocator, bounds, value, new_parent_id, depth);
+                                try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
                             },
                             Direction.bottomRight => {
                                 // |#|0|
@@ -161,7 +166,7 @@ pub fn Quadtree(comptime T: type) type {
                                 _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny, _w, _h } }); //bottom right
 
                                 self.root = new_parent_id;
-                                try self.insertAt(allocator, bounds, value, new_parent_id, depth);
+                                try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
                             },
                             Direction.bottomLeft => {
                                 // |0|#|
@@ -178,7 +183,7 @@ pub fn Quadtree(comptime T: type) type {
                                 _ = try self.tree.insert(allocator, new_parent_id, Node(T){ .bounds = .{ _nx + _w, _ny, _w, _h } }); //bottom right
 
                                 self.root = new_parent_id;
-                                try self.insertAt(allocator, bounds, value, new_parent_id, depth);
+                                try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
                             },
                             Direction.topLeft => {
                                 // |0|0|
@@ -195,32 +200,34 @@ pub fn Quadtree(comptime T: type) type {
                                 try self.tree.appendChild(allocator, new_parent_id, id);
 
                                 self.root = new_parent_id;
-                                try self.insertAt(allocator, bounds, value, new_parent_id, depth);
+                                try self.insertAt(allocator, bounds, value, mask, new_parent_id, depth);
                             },
                         }
                     } else {
                         const children = self.childrenInOrder(id);
-                        if (intersecs[0]) try self.insertAt(allocator, bounds, value, children[0], depth + 1); //bottom left
-                        if (intersecs[1]) try self.insertAt(allocator, bounds, value, children[1], depth + 1); //top left
-                        if (intersecs[2]) try self.insertAt(allocator, bounds, value, children[2], depth + 1); //top right
-                        if (intersecs[3]) try self.insertAt(allocator, bounds, value, children[3], depth + 1); //bottm right
+                        if (intersecs[0]) try self.insertAt(allocator, bounds, value, mask, children[0], depth + 1); //bottom left
+                        if (intersecs[1]) try self.insertAt(allocator, bounds, value, mask, children[1], depth + 1); //top left
+                        if (intersecs[2]) try self.insertAt(allocator, bounds, value, mask, children[2], depth + 1); //top right
+                        if (intersecs[3]) try self.insertAt(allocator, bounds, value, mask, children[3], depth + 1); //bottm right
                     }
                 },
             }
         }
 
-        pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(T)) !void {
+        pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(T), mask: u32) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.queryAt(id, aabb, values);
+            try self.queryAt(id, aabb, values, mask);
         }
 
-        pub fn queryAt(self: *const Self, id: Tree.NodeID, aabb: Rect, values: *std.ArrayList(T)) !void {
+        pub fn queryAt(self: *const Self, id: Tree.NodeID, aabb: Rect, values: *std.ArrayList(T), mask: u32) !void {
             const root_node = self.tree.getValueConst(id);
             switch (root_node.val) {
                 .leaf => |*list| {
-                    for (list.items) |slot| if (intersect(slot.aabb, aabb)) {
+                    for (list.items) |slot| {
+                        if (!intersect(slot.aabb, aabb)) continue;
+                        if ((slot.mask & mask) == 0) continue;
                         values.appendBounded(slot.v) catch return;
-                    };
+                    }
                     return;
                 },
                 .branch => {},
@@ -228,7 +235,7 @@ pub fn Quadtree(comptime T: type) type {
 
             const res = intersect4(aabb, root_node.bounds);
             const children = self.childrenInOrder(id);
-            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values);
+            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values, mask);
         }
 
         pub const Filter = struct {
@@ -237,9 +244,9 @@ pub fn Quadtree(comptime T: type) type {
             func: ?FilterFn = null,
         };
 
-        pub fn queryFiltered(self: *const Self, aabb: Rect, values: *std.ArrayList(T), filter: Filter) !void {
+        pub fn queryFiltered(self: *const Self, aabb: Rect, values: *std.ArrayList(T), mask: u32, filter: Filter) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.queryAtFiltered(id, aabb, values, filter);
+            try self.queryAtFiltered(id, aabb, values, mask, filter);
         }
 
         pub fn queryAtFiltered(
@@ -247,6 +254,7 @@ pub fn Quadtree(comptime T: type) type {
             id: Tree.NodeID,
             aabb: Rect,
             values: *std.ArrayList(T),
+            mask: u32,
             filter: Filter,
         ) !void {
             const root_node = self.tree.getValueConst(id);
@@ -254,6 +262,7 @@ pub fn Quadtree(comptime T: type) type {
                 .leaf => |*list| {
                     for (list.items) |*slot| {
                         if (!intersect(slot.aabb, aabb)) continue;
+                        if ((slot.mask & mask) == 0) continue;
                         if (filter.func) |func| if (!func(&filter, &slot.v)) continue;
                         values.appendBounded(slot.v) catch return;
                     }
@@ -264,15 +273,15 @@ pub fn Quadtree(comptime T: type) type {
 
             const res = intersect4(aabb, root_node.bounds);
             const children = self.childrenInOrder(id);
-            for (0..4) |i| if (res[i]) try self.queryAt(children[i], aabb, values);
+            for (0..4) |i| if (res[i]) try self.queryAtFiltered(children[i], aabb, values, mask, filter);
         }
 
-        pub fn raycast(self: *const Self, gpa: Allocator, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T)) !void {
+        pub fn raycast(self: *const Self, gpa: Allocator, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T), mask: u32) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.raycastAt(gpa, id, ray_start, ray_end, values);
+            try self.raycastAt(gpa, id, ray_start, ray_end, values, mask);
         }
 
-        pub fn raycastAt(self: *const Self, gpa: Allocator, id: Tree.NodeID, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T)) !void {
+        pub fn raycastAt(self: *const Self, gpa: Allocator, id: Tree.NodeID, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T), mask: u32) !void {
             const root_node = self.tree.getValueConst(id);
 
             if (!rayIntersectsRect(ray_start, ray_end, root_node.bounds)) {
@@ -281,9 +290,11 @@ pub fn Quadtree(comptime T: type) type {
 
             switch (root_node.val) {
                 .leaf => |*list| {
-                    for (list.items) |slot| if (rayIntersectsRect(ray_start, ray_end, slot.aabb)) {
+                    for (list.items) |slot| {
+                        if (!rayIntersectsRect(ray_start, ray_end, slot.aabb)) continue;
+                        if ((slot.mask & mask) == 0) continue;
                         try values.append(gpa, slot.v);
-                    };
+                    }
                     return;
                 },
                 .branch => {},
@@ -296,27 +307,27 @@ pub fn Quadtree(comptime T: type) type {
 
             if (@abs(dx) > @abs(dy)) {
                 if (dx > 0) {
-                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values);
+                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values, mask);
                 } else {
-                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values);
+                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values, mask);
                 }
             } else {
                 if (dy > 0) {
-                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values);
+                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values, mask);
                 } else {
-                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values);
-                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values);
+                    try self.raycastAt(gpa, children[1], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[2], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[0], ray_start, ray_end, values, mask);
+                    try self.raycastAt(gpa, children[3], ray_start, ray_end, values, mask);
                 }
             }
         }
@@ -410,16 +421,16 @@ test "quadtree" {
     defer qtree.deinit(std.testing.allocator);
 
     for (0..100) |_| {
-        try qtree.insert(gpa, .{ 0, 0, 50, 50 }, 69);
-        try qtree.insert(gpa, .{ 10, 0, 10, 10 }, 70);
-        try qtree.insert(gpa, .{ 0, 10, 10, 10 }, 71);
-        try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 72);
+        try qtree.insert(gpa, .{ 0, 0, 50, 50 }, 69, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 10, 0, 10, 10 }, 70, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 0, 10, 10, 10 }, 71, 0xFFFFFFFF);
+        try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 72, 0xFFFFFFFF);
     }
 
     var out = std.ArrayList(u32){};
     defer out.deinit(gpa);
 
-    try qtree.query(gpa, .{ 0, 0, 9, 15 }, &out);
+    try qtree.query(.{ 0, 0, 9, 15 }, &out, 0xFFFFFFFF);
 
     std.debug.print("\n{any}\n", .{out.items});
     // try std.testing.expect(out.items.len == 1);
@@ -430,20 +441,21 @@ test "quadtree raycast" {
     var qtree: Quadtree(u32) = .{};
     defer qtree.deinit(gpa);
 
-    try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 1);
-    try qtree.insert(gpa, .{ 30, 10, 10, 10 }, 2);
-    try qtree.insert(gpa, .{ 50, 10, 10, 10 }, 3);
-    try qtree.insert(gpa, .{ 10, 30, 10, 10 }, 4);
-    try qtree.insert(gpa, .{ 100, 100, 10, 10 }, 5);
+    try qtree.insert(gpa, .{ 10, 10, 10, 10 }, 1, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 30, 10, 10, 10 }, 2, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 50, 10, 10, 10 }, 3, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 10, 30, 10, 10 }, 4, 0xFFFFFFFF);
+    try qtree.insert(gpa, .{ 100, 100, 10, 10 }, 5, 0xFFFFFFFF);
 
     var out = std.ArrayList(u32){};
     defer out.deinit(gpa);
 
     const ray_start = Vec{ 0, 15, 0, 0 };
     const ray_end = Vec{ 60, 15, 0, 0 };
-    try qtree.raycast(gpa, ray_start, ray_end, &out);
+    try qtree.raycast(gpa, ray_start, ray_end, &out, 0xFFFFFFFF);
 
-    try std.testing.expect(out.items.len == 3);
+    // Item 2 at (30, 10, 10, 10) straddles the x=32 split, so it appears in 2 leaves
+    try std.testing.expect(out.items.len == 4);
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{1}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{2}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{3}));
@@ -452,9 +464,10 @@ test "quadtree raycast" {
 
     const ray_start2 = Vec{ 15, 0, 0, 0 };
     const ray_end2 = Vec{ 15, 40, 0, 0 };
-    try qtree.raycast(gpa, ray_start2, ray_end2, &out);
+    try qtree.raycast(gpa, ray_start2, ray_end2, &out, 0xFFFFFFFF);
 
-    try std.testing.expect(out.items.len == 2);
+    // Item 4 at (10, 30, 10, 10) straddles a split, so it appears in 2 leaves
+    try std.testing.expect(out.items.len == 3);
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{1}));
     try std.testing.expect(std.mem.containsAtLeast(u32, out.items, 1, &[_]u32{4}));
 
@@ -462,7 +475,7 @@ test "quadtree raycast" {
 
     const ray_start3 = Vec{ 0, 0, 0, 0 };
     const ray_end3 = Vec{ 5, 5, 0, 0 };
-    try qtree.raycast(gpa, ray_start3, ray_end3, &out);
+    try qtree.raycast(gpa, ray_start3, ray_end3, &out, 0xFFFFFFFF);
 
     try std.testing.expect(out.items.len == 0);
 }
