@@ -82,14 +82,9 @@ pub fn Quadtree(
 
         pub fn insertAt(self: *Self, allocator: Allocator, bounds: Rect, value: T, mask: u32, id: Tree.NodeID, depth: u32) !void {
             const node = self.tree.getValue(id);
-            const intersecs = intersect4(bounds, node.bounds);
-
-            // has children or leaf?
             switch (node.val) {
                 .leaf => |*ar| {
                     const needs_split = (ar.items.len > MAXITEMS) and ((node.bounds[2] - node.bounds[0]) > MINSIZE); // or depth < 6;
-                    // const needs_split = depth < 5;
-
                     if (needs_split) {
                         const min_x = node.bounds[0];
                         const min_y = node.bounds[1];
@@ -127,8 +122,9 @@ pub fn Quadtree(
                     }
                 },
                 .branch => {
+                    const intersections = intersect4(bounds, node.bounds);
                     // no hits at all, expand outside -> reinsert
-                    if (@as(u4, @bitCast(intersecs)) == 0) {
+                    if (@as(u4, @bitCast(intersections)) == 0) {
                         if (self.tree.getParent(id) != null) {
                             //TODO: skip for now
                             return;
@@ -210,16 +206,16 @@ pub fn Quadtree(
                         }
                     } else {
                         const children = self.childrenInOrder(id);
-                        if (intersecs[0]) try self.insertAt(allocator, bounds, value, mask, children[0], depth + 1); //bottom left
-                        if (intersecs[1]) try self.insertAt(allocator, bounds, value, mask, children[1], depth + 1); //top left
-                        if (intersecs[2]) try self.insertAt(allocator, bounds, value, mask, children[2], depth + 1); //top right
-                        if (intersecs[3]) try self.insertAt(allocator, bounds, value, mask, children[3], depth + 1); //bottm right
+                        if (intersections[0]) try self.insertAt(allocator, bounds, value, mask, children[0], depth + 1); //bottom left
+                        if (intersections[1]) try self.insertAt(allocator, bounds, value, mask, children[1], depth + 1); //top left
+                        if (intersections[2]) try self.insertAt(allocator, bounds, value, mask, children[2], depth + 1); //top right
+                        if (intersections[3]) try self.insertAt(allocator, bounds, value, mask, children[3], depth + 1); //bottm right
                     }
                 },
             }
         }
 
-        pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(T), mask: u32) !void {
+        pub fn query(self: *const Self, aabb: Rect, values: *std.ArrayList(Entry), mask: u32) !void {
             const id = self.root orelse return error.EmptyTree;
             try self.queryAtFiltered(id, aabb, values, mask, .{});
         }
@@ -230,16 +226,22 @@ pub fn Quadtree(
             func: ?FilterFn = null,
         };
 
-        pub fn queryFiltered(self: *const Self, aabb: Rect, values: *std.ArrayList(T), mask: u32, filter: Filter) !void {
+        pub fn queryFiltered(self: *const Self, aabb: Rect, depth: *u32, values: *std.ArrayList(Entry), mask: u32, filter: Filter) !void {
             const id = self.root orelse return error.EmptyTree;
-            try self.queryAtFiltered(id, aabb, values, mask, filter);
+            try self.queryAtFiltered(id, aabb, depth, values, mask, filter);
         }
+
+        pub const Entry = struct {
+            val: T,
+            aabb: Vec,
+        };
 
         pub fn queryAtFiltered(
             self: *const Self,
             id: Tree.NodeID,
             aabb: Rect,
-            values: *std.ArrayList(T),
+            depth: *u32,
+            values: *std.ArrayList(Entry),
             mask: u32,
             filter: Filter,
         ) !void {
@@ -250,18 +252,23 @@ pub fn Quadtree(
                         if (!intersect(slot.aabb, aabb)) continue;
                         if ((slot.mask & mask) == 0) continue;
                         if (filter.func) |func| if (!func(&filter, &slot.v)) continue;
-                        for (values.items) |t| if (CMP(t, slot.v)) continue :blk;
+                        for (values.items) |entry| if (CMP(entry.val, slot.v)) continue :blk;
 
-                        values.appendBounded(slot.v) catch return;
+                        values.appendBounded(.{
+                            .val = slot.v,
+                            .aabb = slot.aabb,
+                        }) catch return;
                     }
                     return;
                 },
-                .branch => {},
+                .branch => {
+                    depth.* += 1;
+                },
             }
 
             const res = intersect4(aabb, root_node.bounds);
             const children = self.childrenInOrder(id);
-            for (0..4) |i| if (res[i]) try self.queryAtFiltered(children[i], aabb, values, mask, filter);
+            for (0..4) |i| if (res[i]) try self.queryAtFiltered(children[i], aabb, depth, values, mask, filter);
         }
 
         pub fn raycast(self: *const Self, gpa: Allocator, ray_start: Vec, ray_end: Vec, values: *std.ArrayList(T), mask: u32) !void {
@@ -338,12 +345,12 @@ pub inline fn intersect(a: Rect, b: Rect) bool {
 }
 
 inline fn parseDir(vec: Vec) Direction {
-    if (vec[0] == -1 and vec[1] == -1) return Direction.bottomLeft;
-    if (vec[0] == -1 and vec[1] == 1) return Direction.topLeft;
-    if (vec[0] == 1 and vec[1] == 1) return Direction.topRight;
-    if (vec[0] == 1 and vec[1] == -1) return Direction.bottomRight;
+    if (vec[0] < -0.5 and vec[1] < -0.5) return Direction.bottomLeft;
+    if (vec[0] < -0.5 and vec[1] > 0.5) return Direction.topLeft;
+    if (vec[0] > 0.5 and vec[1] > 0.5) return Direction.topRight;
+    if (vec[0] > 0.5 and vec[1] < -0.5) return Direction.bottomRight;
 
-    @panic("impossible");
+    return Direction.topLeft;
 }
 
 /// quadtree 4x intersect in cw

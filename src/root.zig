@@ -17,3 +17,4 @@ const bt = @import("btree.zig");
 pub const BTree = bt.BTree;
 pub const fBTree = bt.fBTree;
 pub const iBTree = bt.iBTree;
+pub const uBTree = bt.uBTree;

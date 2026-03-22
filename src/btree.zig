@@ -9,7 +9,11 @@ pub fn iBTree(comptime T: type) type {
     return BTree(T, i32, default_cmpr(i32));
 }
 
-fn default_cmpr(comptime T: type) fn (T, T) bool {
+pub fn uBTree(comptime T: type) type {
+    return BTree(T, u32, default_cmpr(i32));
+}
+
+pub fn default_cmpr(comptime T: type) fn (T, T) bool {
     return (struct {
         fn cmp(a: T, b: T) bool {
             return a > b;
