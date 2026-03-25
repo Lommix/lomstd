@@ -37,9 +37,11 @@ const Flags = packed struct {
     just_released: bool = false,
     entered: bool = false,
     exited: bool = false,
-    focus: bool = false,
+    // focus: bool = false,
     updated: bool = false,
     active: bool = false,
+    entered_active: bool = false,
+    exit_active: bool = false,
     dragged: bool = false,
 };
 
@@ -320,7 +322,10 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     if (state.flags.just_pressed) state.flags.dragged = true;
     if (mouse.just_released) state.flags.dragged = false;
 
+    const was_active = state.flags.active;
     if (state.flags.just_pressed) state.flags.active = !state.flags.active;
+    state.flags.entered_active = !was_active and state.flags.active;
+    state.flags.exit_active = was_active and !state.flags.active;
     if (state.flags.pressed) state.pressed_dt = @min(1, state.pressed_dt + dt) else state.pressed_dt = @max(0, state.pressed_dt - dt);
     if (state.flags.hovered) state.hover_dt = @min(1, state.hover_dt + dt) else state.hover_dt = @max(0, state.hover_dt - dt);
 }
@@ -470,7 +475,7 @@ fn compute_position(tree: *UiTree, id: u32) void {
 
     while (child_itr.next()) |child| {
         child_count += 1;
-        child.value.computed.z = node.computed.z + 1 + child.value.style.z;
+        child.value.computed.z = node.computed.z + 50 + child.value.style.z;
 
         if (child.value.style.position == .absolute) continue;
 
@@ -604,7 +609,6 @@ fn compute_position(tree: *UiTree, id: u32) void {
 
 pub fn render(self: *@This(), gpa: std.mem.Allocator, ctx: ?*anyopaque) !void {
     for (self.tree.nodes.items(.value)) |*node| {
-        // render: ?*const fn (gpa: std.mem.Allocator, node: *Node, ctx: ?*anyopaque) anyerror!void = null,
         if (node.render) |func| {
             try func(gpa, node, ctx);
         }

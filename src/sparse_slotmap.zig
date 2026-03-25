@@ -46,9 +46,9 @@ pub fn SparseSlotMap(comptime T: type) type {
             return &self.dense.items[id];
         }
 
-        pub fn getConst(self: *Self, handle: Handle) ?*const T {
-            const id = self.slotmap.get(handle) orelse return null;
-            return &self.dense.items[id];
+        pub fn getConst(self: *const Self, handle: Handle) ?*const T {
+            const id = self.slotmap.getPtrConst(handle) orelse return null;
+            return &self.dense.items[id.*];
         }
 
         pub fn remove(self: *Self, gpa: std.mem.Allocator, handle: Handle) !T {

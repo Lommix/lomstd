@@ -22,7 +22,7 @@ pub fn SlotMap(comptime T: type) type {
         unused: std.ArrayList(Handle) = .{},
 
         const Self = @This();
-        pub const Handle = struct {
+        pub const Handle = packed struct {
             id: u32,
             gen: u32,
         };
