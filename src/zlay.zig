@@ -28,6 +28,9 @@ pub const State = struct {
     flags: Flags = .{},
     hover_dt: f32 = 0,
     pressed_dt: f32 = 0,
+    scroll_y: f32 = 0,
+    content_height: f32 = 0,
+    scroll_content_node: ?u32 = null,
 };
 
 const Flags = packed struct {
@@ -294,6 +297,15 @@ pub fn compute_ui(
         for (nodes.items) |id| {
             compute_position(&self.tree, id);
             self.compute_state(world_gpa, mouse, dt, id);
+        }
+
+        // update scroll content heights from tree
+        for (self.states.items) |*state| {
+            if (state.scroll_content_node) |node_id| {
+                if (node_id < self.tree.nodes.len) {
+                    state.content_height = self.tree.getValue(node_id).computed.height;
+                }
+            }
         }
 
         for (0..self.states.items.len) |i| {
