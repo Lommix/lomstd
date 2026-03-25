@@ -52,6 +52,7 @@ pub const Area = struct {
     z: f32 = 0,
     width: f32 = 0,
     height: f32 = 0,
+    clip: [4]f32 = .{ -std.math.inf(f32), -std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) },
 
     pub fn pad(self: Self, val: f32) Self {
         var s = self;
@@ -199,6 +200,12 @@ pub const Style = struct {
     max_width: ?f32 = null,
     min_height: ?f32 = null,
     max_height: ?f32 = null,
+    overflow: Overflow = .visible,
+};
+
+pub const Overflow = enum {
+    visible,
+    hidden,
 };
 
 pub const Display = union(enum) {
@@ -554,10 +561,20 @@ fn compute_position(tree: *UiTree, id: u32) void {
         .grid => {},
     }
 
+    // compute effective clip rect for children
+    var node_clip = node.computed.clip;
+    if (node.style.overflow == .hidden) {
+        node_clip[0] = @max(node_clip[0], node.computed.x);
+        node_clip[1] = @max(node_clip[1], node.computed.y - node.computed.height);
+        node_clip[2] = @min(node_clip[2], node.computed.x + node.computed.width);
+        node_clip[3] = @min(node_clip[3], node.computed.y);
+    }
+
     child_itr.reset();
 
     var gap_count = child_count -| 1;
     while (child_itr.next()) |child| {
+        child.value.computed.clip = node_clip;
         const left = switch (child.value.style.left) {
             .perc => |p| p * node.computed.width,
             .px => |p| p,
