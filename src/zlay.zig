@@ -195,6 +195,10 @@ pub const Style = struct {
     left: Val = .shrink,
     font_size: f32 = 16,
     z: f32 = 0,
+    min_width: ?f32 = null,
+    max_width: ?f32 = null,
+    min_height: ?f32 = null,
+    max_height: ?f32 = null,
 };
 
 pub const Display = union(enum) {
@@ -330,6 +334,13 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     if (state.flags.hovered) state.hover_dt = @min(1, state.hover_dt + dt) else state.hover_dt = @max(0, state.hover_dt - dt);
 }
 
+fn clamp_size(value: f32, min_val: ?f32, max_val: ?f32) f32 {
+    var v = value;
+    if (min_val) |mn| v = @max(v, mn);
+    if (max_val) |mx| v = @min(v, mx);
+    return v;
+}
+
 fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     const node = tree.getValue(id);
     var child_itr = tree.IterateChildren(id);
@@ -377,10 +388,12 @@ fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
             } else {
                 node.computed.width += @as(f32, @floatFromInt(count)) * node.style.gap;
             }
+            node.computed.width = clamp_size(node.computed.width, node.style.min_width, node.style.max_width);
         } else {
             value += current;
             node.computed.height = value + node.style.padding.getY();
             node.computed.height += @as(f32, @floatFromInt(rows)) * node.style.gap;
+            node.computed.height = clamp_size(node.computed.height, node.style.min_height, node.style.max_height);
         }
 
         return;
@@ -406,9 +419,11 @@ fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     if (x_axis) {
         node.computed.width = @max(value, @max(node.style.width.get(), node.computed.width));
         if (node.style.position == .absolute) node.computed.width -= node.style.padding.getX();
+        node.computed.width = clamp_size(node.computed.width, node.style.min_width, node.style.max_width);
     } else {
         node.computed.height = @max(value, @max(node.style.height.get(), node.computed.height));
         if (node.style.position == .absolute) node.computed.height -= node.style.padding.getY();
+        node.computed.height = clamp_size(node.computed.height, node.style.min_height, node.style.max_height);
     }
 }
 
@@ -457,6 +472,12 @@ fn compute_grow_axis(x_axis: bool, tree: *UiTree, id: u32) void {
                 val.* = r * p;
             },
             else => {},
+        }
+
+        if (x_axis) {
+            val.* = clamp_size(val.*, child.value.style.min_width, child.value.style.max_width);
+        } else {
+            val.* = clamp_size(val.*, child.value.style.min_height, child.value.style.max_height);
         }
     }
 }
