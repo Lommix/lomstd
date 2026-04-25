@@ -33,12 +33,12 @@ pub fn Quadtree(
             val: union(enum) {
                 leaf: std.ArrayList(Slot(T)),
                 branch: [4]NodeID,
-            } = .{ .leaf = .{} },
+            } = .{ .leaf = .empty },
         };
 
         count: u32 = 0,
         gen: u32 = 0,
-        nodes: std.ArrayList(Node) = .{},
+        nodes: std.ArrayList(Node) = .empty,
         root: ?NodeID = null,
 
         pub fn insert(self: *Self, gpa: Allocator, bounds: Rect, value: T, mask: u32) !void {
@@ -484,7 +484,7 @@ test "quadtree raycast" {
     try qtree.insert(gpa, .{ 10, 30, 20, 40 }, 4, 0xFFFFFFFF);
     try qtree.insert(gpa, .{ 100, 100, 110, 110 }, 5, 0xFFFFFFFF);
 
-    var out: std.ArrayList(u32) = .{};
+    var out: std.ArrayList(u32) = .empty;
     defer out.deinit(gpa);
 
     const ray_start = Vec{ 0, 15, 0, 0 };
