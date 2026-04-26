@@ -1,4 +1,13 @@
 // ==============================================================================
+// custom
+pub inline fn vecs(v: f32) Vec {
+    return @splat(v);
+}
+pub const Z = Vec{ 0, 0, 1, 0 };
+pub const Y = Vec{ 0, 1, 0, 0 };
+pub const X = Vec{ 1, 0, 0, 0 };
+pub const ZERO = Vec{ 0, 0, 0, 0 };
+// ==============================================================================
 //
 // SIMD math library for game developers
 // https://github.com/michal-z/zig-gamedev/tree/main/libs/zmath
@@ -270,17 +279,10 @@ pub const Boolx4 = @Vector(4, bool);
 pub const Boolx8 = @Vector(8, bool);
 pub const Boolx16 = @Vector(16, bool);
 
-pub const Mat4x3 = [12]f32;
 // "Higher-level" aliases
-pub const Vec4 = F32x4;
 pub const Vec = F32x4;
 pub const Mat = [4]F32x4;
 pub const Quat = F32x4;
-
-pub const Z = Vec{ 0, 0, 1, 0 };
-pub const Y = Vec{ 0, 1, 0, 0 };
-pub const X = Vec{ 1, 0, 0, 0 };
-pub const ZERO = Vec{ 0, 0, 0, 0 };
 
 const builtin = @import("builtin");
 const std = @import("std");
@@ -297,11 +299,6 @@ const has_fma = if (cpu_arch == .x86_64) std.Target.x86.featureSetHas(builtin.cp
 // 1. Initialization functions
 //
 // ------------------------------------------------------------------------------
-
-pub inline fn vecs(v: f32) Vec {
-    return @splat(v);
-}
-
 pub inline fn f32x4(e0: f32, e1: f32, e2: f32, e3: f32) F32x4 {
     return .{ e0, e1, e2, e3 };
 }
@@ -314,6 +311,7 @@ pub inline fn f32x16(
     e8: f32, e9: f32, ea: f32, eb: f32, ec: f32, ed: f32, ee: f32, ef: f32) F32x16 {
     return .{ e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, ea, eb, ec, ed, ee, ef };
 }
+// zig fmt: on
 
 pub inline fn f32x4s(e0: f32) F32x4 {
     return splat(F32x4, e0);
@@ -798,12 +796,17 @@ test "zmath.maxFast" {
 }
 
 pub inline fn min(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
-    // This will handle inf & nan
-    return @min(v0, v1); // minps, cmpunordps, andps, andnps, orps
+    const T = @TypeOf(v0, v1);
+    const Child = std.meta.Child(T);
+    // v != v is true only when v is NaN
+    const nan0 = v0 != v0;
+    const nan1 = v1 != v1;
+    // if v0 is NaN, pick v1
+    // else if v1 is NaN, pick v0
+    // else pick normal @min
+    return @select(Child, nan0, v1, @select(Child, nan1, v0, @min(v0, v1)));
 }
 test "zmath.min" {
-    // Calling math.inf causes test to fail!
-    if (builtin.target.os.tag == .macos and builtin.target.cpu.arch == .aarch64) return error.SkipZigTest;
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
         const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
@@ -842,12 +845,17 @@ test "zmath.min" {
 }
 
 pub inline fn max(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
-    // This will handle inf & nan
-    return @max(v0, v1); // maxps, cmpunordps, andps, andnps, orps
+    const T = @TypeOf(v0, v1);
+    const Child = std.meta.Child(T);
+    // v != v is true only when v is NaN
+    const nan0 = v0 != v0;
+    const nan1 = v1 != v1;
+    // if v0 is NaN, pick v1
+    // else if v1 is NaN, pick v0
+    // else pick normal @max
+    return @select(Child, nan0, v1, @select(Child, nan1, v0, @max(v0, v1)));
 }
 test "zmath.max" {
-    // Calling math.inf causes test to fail!
-    if (builtin.target.os.tag == .macos and builtin.target.cpu.arch == .aarch64) return error.SkipZigTest;
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
         const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
@@ -1260,8 +1268,6 @@ pub inline fn clamp(v: anytype, vmin: anytype, vmax: anytype) @TypeOf(v, vmin, v
     return result;
 }
 test "zmath.clamp" {
-    // Calling math.inf causes test to fail!
-    if (builtin.target.os.tag == .macos and builtin.target.cpu.arch == .aarch64) return error.SkipZigTest;
     {
         const v0 = f32x4(-1.0, 0.2, 1.1, -0.3);
         const v = clamp(v0, splat(F32x4, -0.5), splat(F32x4, 0.5));
@@ -1304,8 +1310,6 @@ pub inline fn saturate(v: anytype) @TypeOf(v) {
     return result;
 }
 test "zmath.saturate" {
-    // Calling math.inf causes test to fail!
-    if (builtin.target.os.tag == .macos and builtin.target.cpu.arch == .aarch64) return error.SkipZigTest;
     {
         const v0 = f32x4(-1.0, 0.2, 1.1, -0.3);
         const v = saturate(v0);
@@ -1493,16 +1497,16 @@ test "zmath.modAngle" {
 
 pub inline fn mulAdd(v0: anytype, v1: anytype, v2: anytype) @TypeOf(v0, v1, v2) {
     const T = @TypeOf(v0, v1, v2);
-    // if (@import("zmath_options").enable_cross_platform_determinism) {
-    // return v0 * v1 + v2; // Compiler will generate mul, add sequence (no fma even if the target supports it).
-    // } else {
-    if (cpu_arch == .x86_64 and has_avx and has_fma) {
-        return @mulAdd(T, v0, v1, v2);
+    if (@import("zmath_options").enable_cross_platform_determinism) {
+        return v0 * v1 + v2; // Compiler will generate mul, add sequence (no fma even if the target supports it).
     } else {
-        // NOTE(mziulek): On .x86_64 without HW fma instructions @mulAdd maps to really slow code!
-        return v0 * v1 + v2;
+        if (cpu_arch == .x86_64 and has_avx and has_fma) {
+            return @mulAdd(T, v0, v1, v2);
+        } else {
+            // NOTE(mziulek): On .x86_64 without HW fma instructions @mulAdd maps to really slow code!
+            return v0 * v1 + v2;
+        }
     }
-    // }
 }
 
 fn sin32xN(v: anytype) @TypeOf(v) {
@@ -2032,13 +2036,13 @@ test "zmath.length3" {
 }
 
 pub inline fn normalize2(v: Vec) Vec {
-    return v * splat(F32x4, 1.0) / sqrt(dot2(v, v));
+    return v / sqrt(dot2(v, v));
 }
 pub inline fn normalize3(v: Vec) Vec {
-    return v * splat(F32x4, 1.0) / sqrt(dot3(v, v));
+    return v / sqrt(dot3(v, v));
 }
 pub inline fn normalize4(v: Vec) Vec {
-    return v * splat(F32x4, 1.0) / sqrt(dot4(v, v));
+    return v / sqrt(dot4(v, v));
 }
 test "zmath.normalize3" {
     {
@@ -2630,7 +2634,7 @@ pub fn inverseDet(m: Mat, out_det: ?*F32x4) Mat {
         out_det.?.* = det;
     }
 
-    if (math.approxEqAbs(f32, det[0], 0.0, math.floatEps(f32))) {
+    if (math.approxEqAbs(f64, det[0], 0.0, math.floatEps(f64))) {
         return .{
             f32x4(0.0, 0.0, 0.0, 0.0),
             f32x4(0.0, 0.0, 0.0, 0.0),
@@ -4133,7 +4137,8 @@ test "zmath.fftN" {
             -77.254834, 0.000000, -105.489863, 0.000000, -160.874864, 0.000000, -324.901452, 0.000000,
         };
         for (expected, 0..) |e, ie| {
-            try expect(std.math.approxEqAbs(f32, e, im[(ie / 4)][ie % 4], epsilon));
+            const v: [4]f32 = im[ie / 4];
+            try expect(std.math.approxEqAbs(f32, e, v[ie % 4], epsilon));
         }
     }
 
@@ -4196,7 +4201,8 @@ test "zmath.fftN" {
             -321.749727, 0.000000, 0.000000, 0.000000, -649.802905, 0.000000, 0.000000, 0.000000,
         };
         for (expected, 0..) |e, ie| {
-            try expect(std.math.approxEqAbs(f32, e, im[(ie / 4)][ie % 4], epsilon));
+            const v: [4]f32 = im[ie / 4];
+            try expect(std.math.approxEqAbs(f32, e, v[ie % 4], epsilon));
         }
     }
 }
@@ -4568,7 +4574,7 @@ pub const util = struct {
         return _translation;
     }
 
-    pub fn set_TranslationVec(m: *Mat, _translation: Vec) void {
+    pub fn setTranslationVec(m: *Mat, _translation: Vec) void {
         const w = m[3][3];
         m[3] = _translation;
         m[3][3] = w;
@@ -4628,11 +4634,11 @@ pub const util = struct {
         try expectVecApproxEqAbs(getTranslationVec(mat), f32x4(14.0, 15.0, 16.0, 0.0), 0.0001);
     }
 
-    // test "zmath.util.mat.scale" {
-    //     const mat = mul(scaling(3, 4, 5), translation(6, 7, 8));
-    //     const scale = getScaleVec(mat);
-    //     try expectVecApproxEqAbs(scale, f32x4(3.0, 4.0, 5.0, 0.0), 0.0001);
-    // }
+    test "zmath.util.mat.scale" {
+        const mat = mul(scaling(3, 4, 5), translation(6, 7, 8));
+        const scale = getScaleVec(mat);
+        try expectVecApproxEqAbs(scale, f32x4(3.0, 4.0, 5.0, 0.0), 0.0001);
+    }
 
     test "zmath.util.mat.rotation" {
         const rotate_origin = matFromRollPitchYaw(0.1, 1.2, 2.3);

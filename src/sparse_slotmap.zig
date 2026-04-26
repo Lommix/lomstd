@@ -8,8 +8,8 @@ pub fn SparseSlotMap(comptime T: type) type {
     return struct {
         // ---------------
         slotmap: SlotMap(usize) = .{},
-        dense: std.ArrayList(T) = .{},
-        dense_to_handle: std.ArrayList(Handle) = .{},
+        dense: std.ArrayList(T) = .empty,
+        dense_to_handle: std.ArrayList(Handle) = .empty,
         // ---------------
 
         const Self = @This();
@@ -93,8 +93,8 @@ pub fn SparseSlotMap(comptime T: type) type {
 
             var self = Self{
                 .slotmap = slotmap_inst,
-                .dense = .{},
-                .dense_to_handle = .{},
+                .dense = .empty,
+                .dense_to_handle = .empty,
             };
 
             // Deserialize dense array

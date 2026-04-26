@@ -6,8 +6,8 @@ pub fn MultiTree(comptime T: type) type {
     return struct {
         // ---------------
         nodes: std.MultiArrayList(Slot) = .{},
-        relation: std.ArrayList(Relation) = .{},
-        roots: std.ArrayList(NodeID) = .{},
+        relation: std.ArrayList(Relation) = .empty,
+        roots: std.ArrayList(NodeID) = .empty,
         // ---------------
 
         const Self = @This();
@@ -159,7 +159,7 @@ pub fn MultiTree(comptime T: type) type {
             std.debug.assert(node_id < self.nodes.len);
 
             // Collect all nodes to be removed (including descendants)
-            var to_remove = std.ArrayList(NodeID){};
+            var to_remove: std.ArrayList(NodeID) = .empty;
             defer to_remove.deinit(gpa);
 
             self.collectDescendants(gpa, node_id, &to_remove);
@@ -318,7 +318,7 @@ pub fn MultiTree(comptime T: type) type {
 
         pub const DepthFirstIter = struct {
             tree: *Self,
-            stack: std.ArrayList(RelationID) = .{},
+            stack: std.ArrayList(RelationID) = .empty,
             gpa: Allocator,
             root: NodeID,
             passed_root: bool = false,
@@ -377,8 +377,8 @@ pub fn MultiTree(comptime T: type) type {
 
         pub const BreadthFristIter = struct {
             tree: *Self,
-            current_layer: std.ArrayList(NodeID) = .{},
-            next_layer: std.ArrayList(NodeID) = .{},
+            current_layer: std.ArrayList(NodeID) = .empty,
+            next_layer: std.ArrayList(NodeID) = .empty,
             root: NodeID,
             passed_root: bool = false,
             gpa: Allocator,
@@ -431,8 +431,8 @@ pub fn MultiTree(comptime T: type) type {
         pub fn IterateBreathedFirst(self: *Self, gpa: Allocator, root_id: NodeID) BreadthFristIter {
             return BreadthFristIter{
                 .tree = self,
-                .current_layer = .{},
-                .next_layer = .{},
+                .current_layer = .empty,
+                .next_layer = .empty,
                 .root = root_id,
                 .gpa = gpa,
             };
@@ -820,7 +820,7 @@ test "remove with complex sibling relationships" {
 
     // Verify remaining structure
     var iter = tree.IterateChildren(root);
-    var values = std.ArrayList(u32){};
+    var values: std.ArrayList(u32) = .empty;
     defer values.deinit(alloc);
 
     while (iter.next()) |entry| {

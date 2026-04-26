@@ -24,9 +24,9 @@ pub const SlotID = packed struct {
 pub fn SparseSet(comptime T: type) type {
     return struct {
         // ----------------
-        dense: std.ArrayList(T) = .{},
-        dense_to_sparse: std.ArrayList(u32) = .{},
-        sparse: std.ArrayList([1024]SlotID) = .{},
+        dense: std.ArrayList(T) = .empty,
+        dense_to_sparse: std.ArrayList(u32) = .empty,
+        sparse: std.ArrayList([1024]SlotID) = .empty,
         // ----------------
 
         const Self = @This();
@@ -132,9 +132,9 @@ pub fn SparseSet(comptime T: type) type {
 
         pub fn deserialize(gpa: std.mem.Allocator, r: *std.Io.Reader) !Self {
             var self = Self{
-                .dense = std.ArrayList(T){},
-                .dense_to_sparse = std.ArrayList(u32){},
-                .sparse = std.ArrayList([1024]SlotID){},
+                .dense = .empty,
+                .dense_to_sparse = .empty,
+                .sparse = .empty,
             };
 
             // Deserialize items slices and append to ArrayLists
@@ -174,14 +174,14 @@ test "serialize deserialize" {
         a: u32,
         b: f32,
         c: [4]u8,
-        k: std.ArrayList(u32) = .{},
+        k: std.ArrayList(u32) = .empty,
         e: En = .a,
         f: Un = .{ .a = 0.5 },
         o: Other = .{},
         i: E = undefined,
         s: []u8,
         z: *u32,
-        l: std.ArrayList(u32) = .{},
+        l: std.ArrayList(u32) = .empty,
     };
 
     var ss = SparseSet(Some){};
@@ -194,7 +194,7 @@ test "serialize deserialize" {
         const z = try gpa.create(u32);
         z.* = 69;
 
-        var list = std.ArrayList(u32){};
+        var list: std.ArrayList(u32) = .empty;
         try list.append(gpa, 420);
         try list.append(gpa, 421);
 

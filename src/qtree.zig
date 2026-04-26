@@ -66,7 +66,7 @@ pub fn Quadtree(
         }
 
         pub fn clearLeaky(self: *Self) void {
-            self.nodes = .{};
+            self.nodes = .empty;
             self.root = null;
             self.count = 0;
         }

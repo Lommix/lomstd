@@ -18,8 +18,8 @@ pub fn SlotMap(comptime T: type) type {
     const Slot = SlotValue(T);
 
     return struct {
-        items: std.ArrayList(Slot) = .{},
-        unused: std.ArrayList(Handle) = .{},
+        items: std.ArrayList(Slot) = .empty,
+        unused: std.ArrayList(Handle) = .empty,
 
         const Self = @This();
         pub const Handle = packed struct {
@@ -108,8 +108,8 @@ pub fn SlotMap(comptime T: type) type {
             const items_size = try reader.takeInt(u32, .little);
 
             var self = Self{
-                .items = .{},
-                .unused = .{},
+                .items = .empty,
+                .unused = .empty,
             };
 
             for (0..items_size) |_| {
@@ -295,7 +295,7 @@ test "serialize deserialize" {
         o: Other = .{},
         s: []u8,
         z: *u32,
-        l: std.ArrayList(u32) = .{},
+        l: std.ArrayList(u32) = .empty,
     };
 
     var sm = SlotMap(Some){};
@@ -308,7 +308,7 @@ test "serialize deserialize" {
         const z = try gpa.create(u32);
         z.* = 69;
 
-        var list = std.ArrayList(u32){};
+        var list: std.ArrayList(u32) = .empty;
         try list.append(gpa, 420);
         try list.append(gpa, 421);
 

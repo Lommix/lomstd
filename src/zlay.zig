@@ -7,7 +7,7 @@ const UiTree = tr.MultiTree(Node);
 // full responsive layout engine
 
 tree: UiTree = .{},
-states: std.ArrayList(State) = .{},
+states: std.ArrayList(State) = .empty,
 hash_to_index: std.AutoHashMapUnmanaged(u32, usize) = .{},
 mouse_in_ui: bool = false,
 
@@ -257,7 +257,7 @@ pub fn compute_ui(
     self.mouse_in_ui = false;
 
     for (self.tree.roots.items) |root_id| {
-        var nodes: std.ArrayList(u32) = .{};
+        var nodes: std.ArrayList(u32) = .empty;
         var it = self.tree.IterateBreathedFirst(frame_gpa, root_id);
         while (it.next()) |entry| try nodes.append(frame_gpa, entry.node_id);
         // const root = ui.res.tree.getValue(root_id);
