@@ -3,13 +3,13 @@
 Lommix's zig essentials. Each in a separate file for copy pasting.
 Mostly Gamedev related.
 
-zig version: 0.15.1
+zig version: 0.16.0
 
 ## Content
 
 - Layout: responsive UI layout math.
 - Tree: multi root flat tree for UI or Physics.
-- QTree: simple quad tree using the flat tree above.
+- QTree: simple quad tree.
 - Easing: common easing functions.
 - ZMath: SIMD math lib (forked)
 - hashStr: simple & fast xor hashing.
