@@ -108,7 +108,7 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
                 .slice => {
                     const size = try binaryDeserialize(u64, gpa, reader);
                     const slice = try gpa.alloc(ptr.child, @intCast(size));
-                    for (0..@as(u32,@intCast(size))) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
+                    for (0..@as(u32, @intCast(size))) |i| slice[i] = try binaryDeserialize(ptr.child, gpa, reader);
                     return slice;
                 },
                 .one => {
@@ -179,6 +179,16 @@ pub fn binaryDeserialize(comptime T: type, gpa: std.mem.Allocator, reader: *std.
                     const bytes = try reader.take(@sizeOf(T));
                     @memcpy(std.mem.asBytes(&val), bytes);
                 },
+            }
+
+            //TODO: rethink! sloppy arrayList capacity fix
+            if (@hasField(T, "capacity") and @hasField(T, "items")) {
+                @field(val, "capacity") = @field(val, "items").len;
+            }
+
+            //TODO: rethink! sloppy capacity fix
+            if (@hasField(T, "capacity") and @hasField(T, "len")) {
+                @field(val, "capacity") = @field(val, "len");
             }
 
             return val;

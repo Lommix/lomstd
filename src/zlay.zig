@@ -1,10 +1,8 @@
+///! Full custom layout engine for ui
 const std = @import("std");
 const m = @import("zmath.zig");
 const tr = @import("tree.zig");
-// const hashStr = @import("hash.zig").hashStr;
 const UiTree = tr.MultiTree(Node);
-
-// full responsive layout engine
 
 tree: UiTree = .{},
 states: std.ArrayList(State) = .empty,
