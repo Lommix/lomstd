@@ -14,8 +14,8 @@ zig version: 0.16.0
 - ZMath: SIMD math lib (forked)
 - hashStr: simple & fast xor hashing.
 - SparseSet: dense data, sparse IDs. Always useful.
-- SlotMap: fixed index array.
+- SlotMap: generational handle to value container.
 - SparseSlotMap: same as above, but backed by a dense array for fast iteration.
 - Zlay: Full ui layout engine.
 - Timer: Simple timer struct.
-- comptime any binary serializer/deserialzer.
+- s2b: comptime serializer/deserializer for any type (mostly).
