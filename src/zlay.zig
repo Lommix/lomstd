@@ -28,7 +28,9 @@ pub const State = struct {
     pressed_dt: f32 = 0,
     scroll_y: f32 = 0,
     content_height: f32 = 0,
+    viewport_height: f32 = 0,
     scroll_content_node: ?u32 = null,
+    scroll_viewport_node: ?u32 = null,
 };
 
 const Flags = packed struct {
@@ -302,6 +304,11 @@ pub fn compute_ui(
             if (state.scroll_content_node) |node_id| {
                 if (node_id < self.tree.nodes.len) {
                     state.content_height = self.tree.getValue(node_id).computed.height;
+                }
+            }
+            if (state.scroll_viewport_node) |node_id| {
+                if (node_id < self.tree.nodes.len) {
+                    state.viewport_height = self.tree.getValue(node_id).computed.height;
                 }
             }
         }
