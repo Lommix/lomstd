@@ -1,6 +1,8 @@
 pub const Layout = @import("layout.zig");
 pub const MultiTree = @import("tree.zig").MultiTree;
 pub const QuadTree = @import("qtree.zig").Quadtree;
+pub const Aabb = @import("aabbtree.zig").Aabb;
+pub const AabbTree = @import("aabbtree.zig").AabbTree;
 pub const EasingFn = @import("easing.zig");
 pub const Easing = @import("easing.zig").Easing;
 pub const Math = @import("zmath.zig");
