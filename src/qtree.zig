@@ -45,6 +45,7 @@ pub fn Quadtree(
         nodes: std.ArrayList(Node) = .empty,
         items: std.ArrayList(Slot(T)) = .empty,
         root: ?NodeID = null,
+        total_bounds: Vec = @splat(0),
 
         pub const Filter = struct {
             const FilterFn = *const fn (filter: *const Filter, *const T) bool;
@@ -76,6 +77,11 @@ pub fn Quadtree(
             errdefer _ = self.items.pop();
             try self.insertItem(gpa, item_id, root_id);
             self.count += 1;
+
+            const new_min = @min(self.total_bounds, bounds);
+            const new_max = @max(self.total_bounds, bounds);
+            const bound_mask: @Vector(4, bool) = .{ true, true, false, false };
+            self.total_bounds = @select(f32, bound_mask, new_min, new_max);
         }
 
         pub fn deinit(self: *Self, gpa: Allocator) void {
