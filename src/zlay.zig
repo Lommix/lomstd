@@ -38,6 +38,11 @@ const Flags = packed struct {
     pressed: bool = false,
     just_pressed: bool = false,
     just_released: bool = false,
+
+    pressed_alt: bool = false,
+    just_pressed_alt: bool = false,
+    just_released_alt: bool = false,
+
     entered: bool = false,
     exited: bool = false,
     // focus: bool = false,
@@ -326,6 +331,11 @@ pub const MouseState = struct {
     pressed: bool = false,
     just_pressed: bool = false,
     just_released: bool = false,
+
+    pressed_alt: bool = false,
+    just_pressed_alt: bool = false,
+    just_released_alt: bool = false,
+
     x: f32 = 0,
     y: f32 = 0,
 };
@@ -344,6 +354,10 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     state.flags.updated = true;
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
     state.flags.just_released = mouse.just_pressed and state.flags.hovered;
+
+    state.flags.pressed_alt = mouse.pressed_alt and state.flags.hovered;
+    state.flags.just_pressed_alt = mouse.just_pressed_alt and state.flags.hovered;
+    state.flags.just_released_alt = mouse.just_pressed_alt and state.flags.hovered;
 
     self.mouse_in_ui = self.mouse_in_ui | state.flags.hovered;
 

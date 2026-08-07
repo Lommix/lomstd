@@ -19,28 +19,39 @@ pub const Timer = struct {
     }
 
     pub fn tick(self: *Self, dt: f32) bool {
-        const transition: bool = blk: switch (self.dir) {
-            .forward => {
-                self.elapsed += dt;
-                break :blk self.elapsed > self.duration;
-            },
-            .backward => {
-                self.elapsed -= dt;
-                break :blk self.elapsed < 0;
-            },
-        };
+        std.debug.assert(self.duration > 0);
+        std.debug.assert(dt >= 0);
 
-        if (transition) {
+        var remaining = dt;
+        var transitioned = false;
+        while (remaining > 0) {
+            const to_boundary = switch (self.dir) {
+                .forward => @max(0, self.duration - self.elapsed),
+                .backward => @max(0, self.elapsed),
+            };
+
+            if (remaining < to_boundary) {
+                switch (self.dir) {
+                    .forward => self.elapsed += remaining,
+                    .backward => self.elapsed -= remaining,
+                }
+                break;
+            }
+
+            remaining -= to_boundary;
+            self.elapsed = if (self.dir == .forward) self.duration else 0;
+            transitioned = true;
+
             switch (self.loop) {
                 .count => |*c| c.* = c.* -| 1,
                 .inf => {},
             }
 
-            if (self.finished()) return transition;
+            if (self.finished()) return true;
 
             switch (self.mode) {
                 .normal => {
-                    self.elapsed = 0;
+                    self.elapsed = if (self.dir == .forward) 0 else self.duration;
                 },
                 .pingpong => {
                     switch (self.dir) {
@@ -55,9 +66,11 @@ pub const Timer = struct {
                     }
                 },
             }
+
+            if (remaining == 0) break;
         }
 
-        return transition;
+        return transitioned;
     }
 
     pub fn finished(self: *const Self) bool {
@@ -79,3 +92,24 @@ pub const Timer = struct {
         }
     }
 };
+
+test "repeating timer preserves overshoot" {
+    var timer = Timer{ .duration = 0.25, .loop = .inf };
+
+    try std.testing.expect(timer.tick(0.3125));
+    try std.testing.expectApproxEqAbs(0.0625, timer.elapsed, 0.00001);
+    try std.testing.expect(timer.tick(0.1875));
+    try std.testing.expectApproxEqAbs(0, timer.elapsed, 0.00001);
+}
+
+test "pingpong timer applies multiple transitions" {
+    var timer = Timer{
+        .duration = 1,
+        .loop = .{ .count = 3 },
+        .mode = .pingpong,
+    };
+
+    try std.testing.expect(timer.tick(2.5));
+    try std.testing.expectEqual(Timer.Direction.forward, timer.dir);
+    try std.testing.expectApproxEqAbs(0.5, timer.elapsed, 0.00001);
+}
