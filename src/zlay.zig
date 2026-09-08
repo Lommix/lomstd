@@ -28,7 +28,6 @@ pub const SizeFn = *const fn (node: *Node) Area;
 
 pub const State = struct {
     hash: u32,
-    used: bool = false,
     flags: Flags = .{},
     hover_dt: f32 = 0,
     pressed_dt: f32 = 0,
@@ -380,29 +379,21 @@ pub fn compute_ui(
             compute_position(&self.tree, id);
             self.compute_state(world_gpa, mouse, dt, id);
         }
+    }
 
-        // update scroll content heights from tree
-        for (self.states.items) |*state| {
-            if (state.scroll_content_node) |node_id| {
-                if (node_id < self.tree.nodes.len) {
-                    state.content_height = self.tree.getValue(node_id).computed.height;
-                }
-            }
-            if (state.scroll_viewport_node) |node_id| {
-                if (node_id < self.tree.nodes.len) {
-                    state.viewport_height = self.tree.getValue(node_id).computed.height;
-                }
-            }
-            const max_scroll = if (state.viewport_height > 0) @max(0, state.content_height - state.viewport_height) else 0;
-            state.scroll_y = @min(@max(0, state.scroll_y), max_scroll);
-        }
-
-        for (0..self.states.items.len) |i| {
-            const index = self.states.items.len - i - 1;
-            if (!self.states.items[index].used) {
-                _ = self.states.swapRemove(index);
+    for (self.states.items) |*state| {
+        if (state.scroll_content_node) |node_id| {
+            if (node_id < self.tree.nodes.len) {
+                state.content_height = self.tree.getValue(node_id).computed.height;
             }
         }
+        if (state.scroll_viewport_node) |node_id| {
+            if (node_id < self.tree.nodes.len) {
+                state.viewport_height = self.tree.getValue(node_id).computed.height;
+            }
+        }
+        const max_scroll = if (state.viewport_height > 0) @max(0, state.content_height - state.viewport_height) else 0;
+        state.scroll_y = @min(@max(0, state.scroll_y), max_scroll);
     }
 }
 
@@ -773,10 +764,9 @@ pub fn endFrame(self: *@This()) void {
 pub fn getState(self: *@This(), gpa: std.mem.Allocator, hash: u32) !*State {
     const res = try self.hash_to_index.getOrPut(gpa, hash);
     if (!res.found_existing) {
-        try self.states.append(gpa, .{ .hash = hash, .used = true });
+        try self.states.append(gpa, .{ .hash = hash });
         res.value_ptr.* = self.states.items.len - 1;
     }
-    self.states.items[res.value_ptr.*].used = true;
     return &self.states.items[res.value_ptr.*];
 }
 
@@ -850,6 +840,35 @@ test "scroll clamps against measured heights" {
     try std.testing.expectEqual(@as(f32, 0), state.scroll_y);
 }
 
+test "scroll survives clamp when other roots exist" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var first = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 100, .height = 100 }) };
+    _ = try ui.begin(std.testing.allocator, &first, .{ .style = .{ .width = .{ .px = 50 }, .height = .{ .px = 50 } } });
+    ui.close(&first);
+
+    var second = Context{ .hash = 2, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 100, .height = 100 }) };
+    const viewport_id = try ui.begin(std.testing.allocator, &second, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 }, .overflow = .hidden },
+    });
+    const content_id = try ui.begin(std.testing.allocator, &second, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 300 }, .position = .absolute },
+    });
+
+    const state = try ui.getState(std.testing.allocator, 7);
+    bindScroll(state, content_id, viewport_id);
+
+    state.scroll_y = 100;
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+    try std.testing.expectEqual(@as(f32, 100), state.scroll_y);
+}
+
 test "label hash differs per tree depth" {
     var ctx = Context{ .hash = 0, .parent = 0 };
     const label: u32 = 42;
@@ -857,7 +876,7 @@ test "label hash differs per tree depth" {
     const shallow = ctx.salt(label);
     ctx.pop();
 
-    ctx.salt(7);
+    _ = ctx.salt(7);
     const deep = ctx.salt(label);
     ctx.pop();
     ctx.pop();
