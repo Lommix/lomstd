@@ -491,7 +491,7 @@ fn compute_grow_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     }
 
     remaining -= if (x_axis) node.style.padding.getX() else node.style.padding.getY();
-    if (should_sum) remaining -= node.style.gap;
+    if (should_sum) remaining -= node.style.gap * @as(f32, @floatFromInt(child_count -| 1));
 
     child_itr.reset();
     const step = if (should_sum) remaining / @as(f32, @floatFromInt(@max(1, grow_count))) else remaining;
