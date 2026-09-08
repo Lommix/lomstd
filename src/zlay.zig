@@ -8,17 +8,23 @@ tree: UiTree = .{},
 states: std.ArrayList(State) = .empty,
 hash_to_index: std.AutoHashMapUnmanaged(u32, usize) = .{},
 mouse_in_ui: bool = false,
+mouse: MouseState = .{},
 
+/// Callback seam between zlay and the embedding UI layer. `render` draws the
+/// node during `render`, `size` reports the intrinsic size during compute.
+/// `ctx` carries caller data; both callbacks cast it back to its concrete
+/// type. A null `render` makes a pure layout node.
 pub const Node = struct {
     state_hash: ?u32 = null,
     ctx: ?*anyopaque = null,
     style: Style = .{},
     computed: Area = .{},
-    /// user provided render function
-    render: ?*const fn (gpa: std.mem.Allocator, node: *Node, ctx: ?*anyopaque) anyerror!void = null,
-    /// user provided size function
-    size: *const fn (node: *Node) Area = &default_size,
+    render: ?RenderFn = null,
+    size: SizeFn = &default_size,
 };
+
+pub const RenderFn = *const fn (gpa: std.mem.Allocator, node: *Node, ctx: ?*anyopaque) anyerror!void;
+pub const SizeFn = *const fn (node: *Node) Area;
 
 pub const State = struct {
     hash: u32,
@@ -198,8 +204,6 @@ pub const Style = struct {
     delay: f32 = 200,
     bg: m.Vec = @splat(0),
     fg: m.Vec = @splat(1),
-    rect: ?m.Vec = null,
-    patch: m.Vec = @splat(0),
     top: Val = .shrink,
     left: Val = .shrink,
     font_size: f32 = 16,
@@ -231,10 +235,13 @@ pub const Align = enum {
 pub const Context = struct {
     const Self = @This();
     const MAXDEPTH: u32 = 32;
+    const MAXSCROLL: u32 = 4;
     hash: u32,
     parent: UiTree.NodeID,
     hash_stack: [MAXDEPTH]u32 = undefined,
     hash_stack_len: u32 = 0,
+    scroll_stack: [MAXSCROLL]*State = undefined,
+    scroll_stack_len: u32 = 0,
 
     pub fn salt(self: *Context, hash: u32) u32 {
         std.debug.assert(self.hash_stack_len < MAXDEPTH);
@@ -250,7 +257,76 @@ pub const Context = struct {
         self.hash_stack_len -|= 1;
         self.hash ^= self.hash_stack[self.hash_stack_len];
     }
+
+    pub fn pushScroll(self: *Context, state: *State) void {
+        std.debug.assert(self.scroll_stack_len < MAXSCROLL);
+        self.scroll_stack[self.scroll_stack_len] = state;
+        self.scroll_stack_len += 1;
+    }
+
+    pub fn popScroll(self: *Context) *State {
+        std.debug.assert(self.scroll_stack_len > 0);
+        self.scroll_stack_len -= 1;
+        return self.scroll_stack[self.scroll_stack_len];
+    }
 };
+
+pub fn begin(self: *@This(), alloc: std.mem.Allocator, ctx: *Context, node: Node) !UiTree.NodeID {
+    const id = try self.tree.insert(alloc, ctx.parent, node);
+    ctx.parent = id;
+    return id;
+}
+
+pub fn beginStateful(self: *@This(), alloc: std.mem.Allocator, gpa: std.mem.Allocator, ctx: *Context, node: Node, label_hash: u32) !*State {
+    const hash = ctx.salt(label_hash);
+    var n = node;
+    n.state_hash = hash;
+    ctx.parent = try self.tree.insert(alloc, ctx.parent, n);
+    return try self.getState(gpa, hash);
+}
+
+pub fn leaf(self: *@This(), alloc: std.mem.Allocator, ctx: *Context, node: Node) !void {
+    _ = try self.tree.insert(alloc, ctx.parent, node);
+}
+
+pub fn close(self: *@This(), ctx: *Context) void {
+    const new_parent = self.tree.getParent(ctx.parent) orelse return;
+    ctx.pop();
+    ctx.parent = new_parent;
+}
+
+pub fn bindScroll(state: *State, content_id: u32, viewport_id: u32) void {
+    state.scroll_content_node = content_id;
+    state.scroll_viewport_node = viewport_id;
+}
+
+pub fn spacer(self: *@This(), alloc: std.mem.Allocator, ctx: *Context, height: f32, draw: ?RenderFn) !void {
+    _ = try self.begin(alloc, ctx, .{ .style = .{ .height = .{ .px = height } }, .render = draw });
+    self.close(ctx);
+}
+
+pub fn line(self: *@This(), alloc: std.mem.Allocator, ctx: *Context, height: f32, color: m.Vec, draw: ?RenderFn) !void {
+    _ = try self.begin(alloc, ctx, .{
+        .style = .{ .height = .{ .px = height }, .width = .grow, .bg = color },
+        .render = draw,
+    });
+    self.close(ctx);
+}
+
+pub fn currentStyle(self: *@This(), ctx: *const Context) *Style {
+    return &self.tree.getValue(ctx.parent).style;
+}
+
+pub fn newRoot(self: *@This(), alloc: std.mem.Allocator, area: Area) !UiTree.NodeID {
+    return try self.tree.root(alloc, .{
+        .computed = area,
+        .style = .{
+            .display = .col,
+            .width = .{ .px = area.width },
+            .height = .{ .px = area.height },
+        },
+    });
+}
 
 pub fn compute_ui(
     self: *@This(),
@@ -260,6 +336,7 @@ pub fn compute_ui(
     mouse: MouseState,
 ) !void {
     self.mouse_in_ui = false;
+    self.mouse = mouse;
 
     for (self.tree.roots.items) |root_id| {
         var nodes: std.ArrayList(u32) = .empty;
@@ -316,6 +393,8 @@ pub fn compute_ui(
                     state.viewport_height = self.tree.getValue(node_id).computed.height;
                 }
             }
+            const max_scroll = if (state.viewport_height > 0) @max(0, state.content_height - state.viewport_height) else 0;
+            state.scroll_y = @min(@max(0, state.scroll_y), max_scroll);
         }
 
         for (0..self.states.items.len) |i| {
@@ -338,6 +417,9 @@ pub const MouseState = struct {
 
     x: f32 = 0,
     y: f32 = 0,
+    dx: f32 = 0,
+    dy: f32 = 0,
+    wheel: f32 = 0,
 };
 
 fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delta: f32, id: u32) void {
@@ -353,11 +435,11 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     state.flags.pressed = mouse.pressed and state.flags.hovered;
     state.flags.updated = true;
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
-    state.flags.just_released = mouse.just_pressed and state.flags.hovered;
+    state.flags.just_released = mouse.just_released and state.flags.hovered;
 
     state.flags.pressed_alt = mouse.pressed_alt and state.flags.hovered;
     state.flags.just_pressed_alt = mouse.just_pressed_alt and state.flags.hovered;
-    state.flags.just_released_alt = mouse.just_pressed_alt and state.flags.hovered;
+    state.flags.just_released_alt = mouse.just_released_alt and state.flags.hovered;
 
     self.mouse_in_ui = self.mouse_in_ui | state.flags.hovered;
 
@@ -684,6 +766,10 @@ pub fn render(self: *@This(), gpa: std.mem.Allocator, ctx: ?*anyopaque) !void {
     }
 }
 
+pub fn endFrame(self: *@This()) void {
+    self.tree = .{};
+}
+
 pub fn getState(self: *@This(), gpa: std.mem.Allocator, hash: u32) !*State {
     const res = try self.hash_to_index.getOrPut(gpa, hash);
     if (!res.found_existing) {
@@ -694,5 +780,88 @@ pub fn getState(self: *@This(), gpa: std.mem.Allocator, hash: u32) !*State {
     return &self.states.items[res.value_ptr.*];
 }
 
-// TODO:
-// move Context and basic builder funcs here
+test "release edges follow mouse events" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    const root_id = try ui.tree.root(std.testing.allocator, .{ .computed = .{ .width = 200, .height = 200 } });
+    _ = try ui.tree.insert(std.testing.allocator, root_id, .{
+        .state_hash = 7,
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 } },
+    });
+
+    const inside = MouseState{ .x = 50, .y = -50 };
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{ .just_pressed = true, .x = inside.x, .y = inside.y });
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{ .just_released = true, .x = inside.x, .y = inside.y });
+    const released = try ui.getState(std.testing.allocator, 7);
+    try std.testing.expect(released.flags.just_released);
+    try std.testing.expect(!released.flags.just_pressed);
+
+    var ui_alt: @This() = .{};
+    defer ui_alt.states.deinit(std.testing.allocator);
+    defer ui_alt.hash_to_index.deinit(std.testing.allocator);
+    defer ui_alt.tree.deinit(std.testing.allocator);
+
+    const alt_root = try ui_alt.tree.root(std.testing.allocator, .{ .computed = .{ .width = 200, .height = 200 } });
+    _ = try ui_alt.tree.insert(std.testing.allocator, alt_root, .{
+        .state_hash = 7,
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 } },
+    });
+
+    try ui_alt.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{ .just_pressed_alt = true, .x = inside.x, .y = inside.y });
+    try ui_alt.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{ .just_released_alt = true, .x = inside.x, .y = inside.y });
+    const released_alt = try ui_alt.getState(std.testing.allocator, 7);
+    try std.testing.expect(released_alt.flags.just_released_alt);
+    try std.testing.expect(!released_alt.flags.just_pressed_alt);
+}
+
+test "scroll clamps against measured heights" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 100, .height = 100 }) };
+    const viewport_id = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 }, .overflow = .hidden },
+    });
+    const content_id = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 300 }, .position = .absolute },
+    });
+
+    const state = try ui.getState(std.testing.allocator, 7);
+    bindScroll(state, content_id, viewport_id);
+
+    state.scroll_y = 5000;
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+    try std.testing.expectEqual(@as(f32, 200), state.scroll_y);
+
+    state.scroll_y = -50;
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+    try std.testing.expectEqual(@as(f32, 0), state.scroll_y);
+}
+
+test "label hash differs per tree depth" {
+    var ctx = Context{ .hash = 0, .parent = 0 };
+    const label: u32 = 42;
+
+    const shallow = ctx.salt(label);
+    ctx.pop();
+
+    ctx.salt(7);
+    const deep = ctx.salt(label);
+    ctx.pop();
+    ctx.pop();
+
+    try std.testing.expect(shallow != deep);
+    try std.testing.expectEqual(@as(u32, 0), ctx.hash);
+}
