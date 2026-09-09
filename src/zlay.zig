@@ -554,10 +554,7 @@ fn compute_grow_axis(x_axis: bool, tree: *UiTree, id: u32) void {
         switch (child_axis) {
             .grow => grow_count += 1,
             .perc => grow_count += 1,
-            .px => |p| {
-                if (should_sum) remaining -= @max(0, p);
-            },
-            .shrink => {
+            .px, .shrink => {
                 if (should_sum) remaining -= @max(0, if (x_axis) child.value.computed.width else child.value.computed.height);
             },
         }
@@ -883,4 +880,38 @@ test "label hash differs per tree depth" {
 
     try std.testing.expect(shallow != deep);
     try std.testing.expectEqual(@as(u32, 0), ctx.hash);
+}
+
+test "grow children account for clamped px siblings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 280, .height = 100 }) };
+    _ = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .display = .row, .width = .grow, .height = .{ .px = 20 } },
+    });
+    try ui.leaf(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 20 }, .height = .{ .px = 10 }, .min_width = 40 },
+    });
+    _ = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .grow, .height = .{ .px = 10 } },
+    });
+    ui.close(&ctx);
+    ui.close(&ctx);
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+
+    const row = ui.tree.getValue(ctx.parent);
+    var it = ui.tree.IterateChildren(ctx.parent);
+    const qty = it.next().?;
+    const name = it.next().?;
+
+    try std.testing.expectEqual(@as(f32, 40), qty.value.computed.width);
+    try std.testing.expectEqual(@as(f32, 240), name.value.computed.width);
+    try std.testing.expect(row.computed.width <= 280);
 }
