@@ -110,6 +110,10 @@ pub const Area = struct {
         return self.x < x and x < self.x + self.width and self.y > y and y > self.y - self.height;
     }
 
+    pub fn clipContains(self: *const Self, x: f32, y: f32) bool {
+        return x >= self.clip[0] and x <= self.clip[2] and y >= self.clip[1] and y <= self.clip[3];
+    }
+
     pub fn offset(self: Self, x: f32, y: f32) Self {
         return Self{
             .x = self.x + x,
@@ -212,6 +216,7 @@ pub const Style = struct {
     min_height: ?f32 = null,
     max_height: ?f32 = null,
     overflow: Overflow = .visible,
+    fit_absolute: bool = false,
 };
 
 pub const Overflow = enum {
@@ -422,7 +427,7 @@ fn compute_state(self: *@This(), gpa: std.mem.Allocator, mouse: MouseState, delt
     const mx = mouse.x;
     const my = mouse.y;
 
-    state.flags.hovered = node.computed.intersect(mx, my);
+    state.flags.hovered = node.computed.intersect(mx, my) and node.computed.clipContains(mx, my);
     state.flags.pressed = mouse.pressed and state.flags.hovered;
     state.flags.updated = true;
     state.flags.just_pressed = mouse.just_pressed and state.flags.hovered;
@@ -510,8 +515,14 @@ fn compute_fit_axis(x_axis: bool, tree: *UiTree, id: u32) void {
         return;
     }
 
+    const cross_axis = switch (node.style.display) {
+        .row => !x_axis,
+        .col => x_axis,
+        .grid => true,
+    };
+
     while (child_itr.next()) |child| {
-        if (child.value.style.position == .absolute) continue;
+        if (child.value.style.position == .absolute and !(node.style.fit_absolute and cross_axis)) continue;
 
         const axis = if (x_axis) child.value.computed.width else child.value.computed.height;
         child_count += 1;
@@ -568,6 +579,7 @@ fn compute_grow_axis(x_axis: bool, tree: *UiTree, id: u32) void {
     while (child_itr.next()) |child| {
         const val = if (x_axis) &child.value.computed.width else &child.value.computed.height;
         const child_axis = if (x_axis) child.value.style.width else child.value.style.height;
+        if (child.value.style.position == .absolute and child_axis != .grow) continue;
 
         switch (child_axis) {
             .grow => val.* = step,
@@ -603,10 +615,11 @@ fn compute_position(tree: *UiTree, id: u32) void {
     var col_h: f32 = 0;
 
     while (child_itr.next()) |child| {
-        child_count += 1;
         child.value.computed.z = node.computed.z + 50 + child.value.style.z;
 
         if (child.value.style.position == .absolute) continue;
+
+        child_count += 1;
 
         switch (node.style.display) {
             .row => {
@@ -643,6 +656,12 @@ fn compute_position(tree: *UiTree, id: u32) void {
         col_count = 0;
     }
 
+    switch (node.style.display) {
+        .row => total_x += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
+        .col => total_y += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
+        .grid => {},
+    }
+
     // calc x start
     var x = switch (node.style.align_x) {
         .center => node.computed.x + node.computed.width * 0.5 - total_x * 0.5,
@@ -655,12 +674,6 @@ fn compute_position(tree: *UiTree, id: u32) void {
         .start => node.computed.y - node.style.padding.top,
         .end => (node.computed.y - node.computed.height) + node.style.padding.bottom + total_y,
     };
-
-    switch (node.style.display) {
-        .row => total_x += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
-        .col => total_y += node.style.gap * @as(f32, @floatFromInt(child_count -| 1)),
-        .grid => {},
-    }
 
     // compute effective clip rect for children
     var node_clip = node.computed.clip;
@@ -837,6 +850,92 @@ test "scroll clamps against measured heights" {
     try std.testing.expectEqual(@as(f32, 0), state.scroll_y);
 }
 
+test "clipped nodes do not capture hover" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 100, .height = 100 }) };
+    _ = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 }, .overflow = .hidden },
+    });
+    const state = try ui.beginStateful(std.testing.allocator, std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 100 }, .height = .{ .px = 100 } },
+    }, 99);
+    const node_id = ctx.parent;
+    ui.close(&ctx);
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+
+    const node = ui.tree.getValue(node_id);
+    node.computed.x = 0;
+    node.computed.y = 150;
+    node.computed.width = 100;
+    node.computed.height = 100;
+    node.computed.clip = .{ 0, 0, 100, 100 };
+
+    ui.compute_state(std.testing.allocator, .{ .x = 50, .y = 75 }, 0.1, node_id);
+    try std.testing.expect(state.flags.hovered);
+
+    ui.compute_state(std.testing.allocator, .{ .x = 50, .y = 125 }, 0.1, node_id);
+    try std.testing.expect(!state.flags.hovered);
+}
+
+test "absolute grow child fills parent on grow axis" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    const root_id = try ui.newRoot(std.testing.allocator, .{ .width = 300, .height = 100 });
+    _ = try ui.tree.insert(std.testing.allocator, root_id, .{
+        .style = .{ .width = .{ .px = 40 }, .height = .{ .px = 20 } },
+    });
+    _ = try ui.tree.insert(std.testing.allocator, root_id, .{
+        .style = .{ .width = .grow, .height = .{ .px = 20 }, .position = .absolute },
+    });
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+
+    var it = ui.tree.IterateChildren(root_id);
+    _ = it.next().?;
+    const abs = it.next().?;
+    try std.testing.expectEqual(@as(f32, 300), abs.value.computed.width);
+}
+
+test "fit_absolute measures absolute children under shrink parent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 100, .height = 100 }) };
+    _ = try ui.begin(std.testing.allocator, &ctx, .{ .style = .{ .display = .row } });
+    const viewport_id = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .display = .col, .width = .grow, .height = .{ .px = 50 }, .overflow = .hidden, .fit_absolute = true },
+    });
+    _ = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 80 }, .height = .{ .px = 200 }, .position = .absolute },
+    });
+    ui.close(&ctx);
+    ui.close(&ctx);
+    ui.close(&ctx);
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+    try std.testing.expectEqual(@as(f32, 80), ui.tree.getValue(viewport_id).computed.width);
+    try std.testing.expectEqual(@as(f32, 50), ui.tree.getValue(viewport_id).computed.height);
+}
+
 test "scroll survives clamp when other roots exist" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -914,4 +1013,83 @@ test "grow children account for clamped px siblings" {
     try std.testing.expectEqual(@as(f32, 40), qty.value.computed.width);
     try std.testing.expectEqual(@as(f32, 240), name.value.computed.width);
     try std.testing.expect(row.computed.width <= 280);
+}
+
+test "centered row with gap keeps even padding" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 300, .height = 100 }) };
+    const row_id = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{
+            .display = .row,
+            .align_x = .center,
+            .gap = 5,
+            .padding = .axis(10, 0),
+            .width = .{ .px = 85 },
+            .height = .{ .px = 20 },
+        },
+    });
+    try ui.leaf(std.testing.allocator, &ctx, .{ .style = .{ .width = .{ .px = 30 }, .height = .{ .px = 10 } } });
+    try ui.leaf(std.testing.allocator, &ctx, .{ .style = .{ .width = .{ .px = 30 }, .height = .{ .px = 10 } } });
+    ui.close(&ctx);
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+
+    const row = ui.tree.getValue(row_id);
+    var it = ui.tree.IterateChildren(row_id);
+    const a = it.next().?;
+    const b = it.next().?;
+
+    const left = a.value.computed.x - row.computed.x;
+    const right = row.computed.x + row.computed.width - (b.value.computed.x + b.value.computed.width);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), left, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), right, 0.001);
+}
+
+test "centered row excludes absolute children from gap count" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var ui: @This() = .{};
+    defer ui.states.deinit(std.testing.allocator);
+    defer ui.hash_to_index.deinit(std.testing.allocator);
+    defer ui.tree.deinit(std.testing.allocator);
+
+    var ctx = Context{ .hash = 1, .parent = try ui.newRoot(std.testing.allocator, .{ .width = 300, .height = 100 }) };
+    const row_id = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{
+            .display = .row,
+            .align_x = .center,
+            .gap = 5,
+            .padding = .axis(10, 0),
+            .width = .{ .px = 85 },
+            .height = .{ .px = 20 },
+        },
+    });
+    try ui.leaf(std.testing.allocator, &ctx, .{ .style = .{ .width = .{ .px = 30 }, .height = .{ .px = 10 } } });
+    _ = try ui.begin(std.testing.allocator, &ctx, .{
+        .style = .{ .width = .{ .px = 30 }, .height = .{ .px = 10 }, .position = .absolute },
+    });
+    ui.close(&ctx);
+    try ui.leaf(std.testing.allocator, &ctx, .{ .style = .{ .width = .{ .px = 30 }, .height = .{ .px = 10 } } });
+    ui.close(&ctx);
+
+    try ui.compute_ui(std.testing.allocator, arena.allocator(), 0.1, .{});
+
+    const row = ui.tree.getValue(row_id);
+    var it = ui.tree.IterateChildren(row_id);
+    const a = it.next().?;
+    _ = it.next().?;
+    const b = it.next().?;
+
+    const left = a.value.computed.x - row.computed.x;
+    const right = row.computed.x + row.computed.width - (b.value.computed.x + b.value.computed.width);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), left, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), right, 0.001);
 }
