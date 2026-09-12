@@ -37,8 +37,7 @@ pub fn Quadtree(
             parent: ?NodeID = null,
             children: ?[4]NodeID = null,
             subtree_mask: u32 = 0,
-            ids: [MAXITEMS]ItemID = undefined,
-            ids_len: u32 = 0,
+            ids: std.ArrayList(ItemID) = .empty,
         };
 
         count: u32 = 0,
@@ -85,6 +84,7 @@ pub fn Quadtree(
         }
 
         pub fn deinit(self: *Self, gpa: Allocator) void {
+            for (self.nodes.items) |*node| node.ids.deinit(gpa);
             self.nodes.deinit(gpa);
             self.items.deinit(gpa);
             self.* = .{};
@@ -93,13 +93,6 @@ pub fn Quadtree(
         pub fn clearLeaky(self: *Self) void {
             self.nodes = .empty;
             self.items = .empty;
-            self.root = null;
-            self.count = 0;
-        }
-
-        pub fn clearRetainingCapacity(self: *Self) void {
-            self.nodes.clearRetainingCapacity();
-            self.items.clearRetainingCapacity();
             self.root = null;
             self.count = 0;
         }
@@ -178,16 +171,8 @@ pub fn Quadtree(
             self.root = new_root;
         }
 
-        fn appendToNode(self: *Self, id: NodeID, item_id: ItemID) !void {
-            var node = &self.nodes.items[id];
-            if (node.ids_len >= MAXITEMS) return error.CapacityReached;
-            node.ids[node.ids_len] = item_id;
-            node.ids_len += 1;
-        }
-
-        fn nodeItemCount(self: *const Self, id: NodeID) u32 {
-            const node = &self.nodes.items[id];
-            return node.ids_len;
+        fn appendToNode(self: *Self, gpa: Allocator, id: NodeID, item_id: ItemID) !void {
+            try self.nodes.items[id].ids.append(gpa, item_id);
         }
 
         fn childIndexContaining(self: *const Self, id: NodeID, bounds: Rect) ?usize {
@@ -214,14 +199,13 @@ pub fn Quadtree(
             const c2 = try self.addNode(gpa, .{ .bounds = .{ mid_x, mid_y, max_x, max_y }, .parent = id });
             const c3 = try self.addNode(gpa, .{ .bounds = .{ mid_x, min_y, max_x, mid_y }, .parent = id });
 
-            const old_ids = self.nodes.items[id].ids;
-            const old_ids_len: usize = @intCast(self.nodes.items[id].ids_len);
-
+            var old_ids = self.nodes.items[id].ids;
             self.nodes.items[id].children = .{ c0, c1, c2, c3 };
             self.nodes.items[id].subtree_mask = 0;
-            self.nodes.items[id].ids_len = 0;
+            self.nodes.items[id].ids = .empty;
+            defer old_ids.deinit(gpa);
 
-            for (old_ids[0..old_ids_len]) |item_id| {
+            for (old_ids.items) |item_id| {
                 try self.insertItem(gpa, item_id, id);
             }
         }
@@ -236,21 +220,20 @@ pub fn Quadtree(
                     return;
                 }
 
-                try self.appendToNode(id, item_id);
+                try self.appendToNode(gpa, id, item_id);
                 self.nodes.items[id].subtree_mask |= item.mask;
                 return;
             }
 
             const bounds = self.nodes.items[id].bounds;
             const can_split = (bounds[2] - bounds[0]) > MINSIZE and (bounds[3] - bounds[1]) > MINSIZE;
-            if (self.nodeItemCount(id) >= MAXITEMS) {
-                if (!can_split) return error.CapacityReached;
+            if (self.nodes.items[id].ids.items.len >= MAXITEMS and can_split) {
                 try self.split(gpa, id);
                 try self.insertItem(gpa, item_id, id);
                 return;
             }
 
-            try self.appendToNode(id, item_id);
+            try self.appendToNode(gpa, id, item_id);
             self.nodes.items[id].subtree_mask |= item.mask;
         }
 
@@ -277,8 +260,7 @@ pub fn Quadtree(
                 const node = &self.nodes.items[id];
                 if ((node.subtree_mask & mask) == 0) continue;
 
-                const ids_len: usize = @intCast(node.ids_len);
-                try self.queryNodeItems(node.ids[0..ids_len], aabb, values, mask, filter);
+                try self.queryNodeItems(node.ids.items, aabb, values, mask, filter);
 
                 if (node.children) |children| {
                     if (self.shouldQueryChild(children[3], aabb, mask) and sp < MAX_STACK) {
@@ -329,8 +311,7 @@ pub fn Quadtree(
             const node = &self.nodes.items[id];
             if ((node.subtree_mask & mask) == 0) return;
 
-            const ids_len: usize = @intCast(node.ids_len);
-            try self.raycastNodeItems(gpa, node.ids[0..ids_len], ray_start, ray_end, values, mask);
+            try self.raycastNodeItems(gpa, node.ids.items, ray_start, ray_end, values, mask);
 
             const children = node.children orelse return;
             const dx = ray_end[0] - ray_start[0];
@@ -440,16 +421,23 @@ test "quadtree" {
     try std.testing.expect(out.items.len == 2);
 }
 
-test "quadtree insert returns CapacityReached at minimum leaf size" {
+test "quadtree stores unbounded items in minimum-size leaf" {
     const gpa = std.testing.allocator;
     var qtree: Quadtree(u32, 2048, 2) = .{};
     defer qtree.deinit(gpa);
 
-    try qtree.insert(gpa, .{ 0, 0, 10, 10 }, 1, 0xFFFFFFFF);
-    try qtree.insert(gpa, .{ 20, 20, 30, 30 }, 2, 0xFFFFFFFF);
-    try std.testing.expectError(error.CapacityReached, qtree.insert(gpa, .{ 40, 40, 50, 50 }, 3, 0xFFFFFFFF));
-    try std.testing.expect(qtree.count == 2);
-    try std.testing.expect(qtree.items.items.len == 2);
+    for (0..300) |i| {
+        const x: f32 = @floatFromInt(i % 100);
+        try qtree.insert(gpa, .{ x, 0, x + 1, 1 }, @intCast(i), 0xFFFFFFFF);
+    }
+
+    try std.testing.expect(qtree.count == 300);
+    try std.testing.expect(qtree.items.items.len == 300);
+
+    var buf: [300]Quadtree(u32, 2048, 2).Entry = undefined;
+    var out = std.ArrayList(Quadtree(u32, 2048, 2).Entry).initBuffer(&buf);
+    try qtree.query(.{ -1, -1, 101, 2 }, &out, 0xFFFFFFFF);
+    try std.testing.expect(out.items.len == 300);
 }
 
 test "quadtree raycast" {
